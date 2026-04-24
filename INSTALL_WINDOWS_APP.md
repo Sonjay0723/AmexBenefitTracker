@@ -6,8 +6,8 @@
 
 ## 📥 Download
 
-1. Go to the [**windows-download**](https://github.com/Sonjay0723/AmexBenefitTracker/tree/windows-download) branch
-2. Click **`release/`** → download **`Amex Benefit Tracker Setup 1.0.0.exe`**
+1. Go to the [**Releases**](https://github.com/Sonjay0723/AmexBenefitTracker/releases) page
+2. Under the latest release, click **`Amex Benefit Tracker Setup 1.0.0.exe`** to download
 
 ---
 
