@@ -16,7 +16,7 @@ import {
   Mail,
   Lock
 } from 'lucide-react';
-import { auth, db, googleProvider } from './firebase';
+import { auth, db, googleProvider, isConfigured } from './firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
@@ -79,6 +79,10 @@ export default function App() {
 
   // Load from Firestore on auth state change
   useEffect(() => {
+    if (!isConfigured) {
+      setIsAuthChecking(false);
+      return;
+    }
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
@@ -223,6 +227,23 @@ export default function App() {
       </button>
     ));
   };
+
+  if (!isConfigured) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md bg-slate-900/60 backdrop-blur-md border border-red-900/50 rounded-3xl p-8 shadow-2xl text-center">
+          <img src="./logo.png" alt="Amex Logo" className="w-20 h-20 object-contain rounded-2xl shadow-lg mx-auto mb-6 opacity-50" />
+          <h2 className="text-2xl font-bold text-white mb-4">Setup Required</h2>
+          <p className="text-slate-400 mb-6">
+            You must provide your Firebase configuration in the <code className="bg-slate-800 px-2 py-1 rounded text-blue-400">.env</code> file before the app can run.
+          </p>
+          <p className="text-sm text-slate-500">
+            See the <strong>walkthrough.md</strong> file for instructions on how to set up Firebase and create your <code className="bg-slate-800 px-1 py-0.5 rounded text-slate-300">.env</code> file.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (isAuthChecking) {
     return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>Loading...</div>;
