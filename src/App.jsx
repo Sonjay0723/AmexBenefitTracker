@@ -236,7 +236,7 @@ export default function App() {
     <div className={`min-h-screen p-4 md:p-8 bg-slate-950 text-white font-sans`}>
       <header className="max-w-6xl mx-auto mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="flex items-center gap-4">
-          <img src="/logo.png" alt="Amex Logo" className="w-16 h-16 object-contain rounded-2xl shadow-lg" />
+          <img src="./logo.png" alt="Amex Logo" className="w-16 h-16 object-contain rounded-2xl shadow-lg" />
           <div>
             <h1 className="text-3xl font-bold tracking-tight mb-1">Benefit Tracker</h1>
             <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setIsEditingYear(true)}>
@@ -379,7 +379,7 @@ function LoginScreen() {
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-md bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-3xl p-8 shadow-2xl">
         <div className="flex flex-col items-center mb-8">
-          <img src="/logo.png" alt="Amex Logo" className="w-20 h-20 object-contain rounded-2xl shadow-lg mb-4" />
+          <img src="./logo.png" alt="Amex Logo" className="w-20 h-20 object-contain rounded-2xl shadow-lg mb-4" />
           <h2 className="text-2xl font-bold text-white">Benefit Tracker</h2>
           <p className="text-slate-400 text-sm mt-1">{isLogin ? 'Sign in to access your data' : 'Create an account to start tracking'}</p>
         </div>
