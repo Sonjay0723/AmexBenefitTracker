@@ -203,7 +203,7 @@ export default function App() {
     <div className={`min-h-screen p-4 md:p-8 bg-slate-950 text-white font-sans`}>
       <header className="max-w-6xl mx-auto mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="flex items-center gap-4">
-          <img src="/logo.png" alt="Amex Logo" className="w-16 h-16 object-contain rounded-2xl shadow-lg" />
+          <img src="/logo.png" alt="Amex Logo" className="w-16 h-16 object-contain mix-blend-screen" />
           <div>
             <h1 className="text-3xl font-bold tracking-tight mb-1">Benefit Tracker</h1>
             <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setIsEditingYear(true)}>
