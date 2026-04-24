@@ -42,7 +42,7 @@ def extract_glow(input_path, output_path, crop=False):
     img.save(output_path, "PNG")
 
 # Re-process the original logo image to get a perfectly transparent one
-# We will use the original generated logo which is saved in the Gemini folder, 
-# or just process the current logo.png (which is the original untouched image).
-extract_glow("public/logo.png", "public/favicon.png", crop=True)
-extract_glow("public/logo.png", "public/logo.png", crop=False)
+# Process the new uploaded logo
+input_img = r"C:\Users\jpitt\.gemini\antigravity\brain\31cff9e4-5053-4307-b8c0-6356f13c2c5d\media__1777048029004.jpg"
+extract_glow(input_img, "public/favicon.png", crop=True)
+extract_glow(input_img, "public/logo.png", crop=False)
