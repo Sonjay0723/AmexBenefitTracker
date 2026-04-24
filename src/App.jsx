@@ -11,8 +11,14 @@ import {
   ShoppingBag,
   RotateCcw,
   Edit2,
-  HardDrive
+  HardDrive,
+  LogOut,
+  Mail,
+  Lock
 } from 'lucide-react';
+import { auth, db, googleProvider } from './firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -68,37 +74,51 @@ export default function App() {
     gold: { enabled: true }
   });
   const [isLoaded, setIsLoaded] = useState(false);
+  const [user, setUser] = useState(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
 
-  // Load from localStorage on mount
+  // Load from Firestore on auth state change
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.usage) setUsage(parsed.usage);
-      if (parsed.trackingYear) setTrackingYear(parsed.trackingYear);
-      if (parsed.corpCreditSettings) setCorpCreditSettings(parsed.corpCreditSettings);
-    } else {
-      const initialUsage = {};
-      Object.keys(INITIAL_DATA).forEach(cardKey => {
-        INITIAL_DATA[cardKey].benefits.forEach(b => {
-          initialUsage[b.id] = Array(12).fill(false);
-        });
-      });
-      setUsage(initialUsage);
-    }
-    setIsLoaded(true);
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        const docRef = doc(db, 'users', currentUser.uid);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          const parsed = docSnap.data();
+          if (parsed.usage) setUsage(parsed.usage);
+          if (parsed.trackingYear) setTrackingYear(parsed.trackingYear);
+          if (parsed.corpCreditSettings) setCorpCreditSettings(parsed.corpCreditSettings);
+        } else {
+          const initialUsage = {};
+          Object.keys(INITIAL_DATA).forEach(cardKey => {
+            INITIAL_DATA[cardKey].benefits.forEach(b => {
+              initialUsage[b.id] = Array(12).fill(false);
+            });
+          });
+          setUsage(initialUsage);
+        }
+        setIsLoaded(true);
+      } else {
+        setIsLoaded(false);
+      }
+      setIsAuthChecking(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  // Save to localStorage on change
+  // Save to Firestore on change
   useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    if (isLoaded && user) {
+      setDoc(doc(db, 'users', user.uid), {
         usage,
         trackingYear,
         corpCreditSettings
-      }));
+      }, { merge: true });
     }
-  }, [usage, trackingYear, corpCreditSettings, isLoaded]);
+  }, [usage, trackingYear, corpCreditSettings, isLoaded, user]);
 
   const toggleMonth = (benefitId, monthIndex) => {
     setUsage(prev => {
@@ -125,9 +145,14 @@ export default function App() {
   };
 
   const resetData = () => {
-    if (window.confirm("Are you sure you want to clear all tracking progress on this device?")) {
-      localStorage.removeItem(STORAGE_KEY);
-      window.location.reload();
+    if (window.confirm("Are you sure you want to clear all your tracking progress? This cannot be undone.")) {
+      const initialUsage = {};
+      Object.keys(INITIAL_DATA).forEach(cardKey => {
+        INITIAL_DATA[cardKey].benefits.forEach(b => {
+          initialUsage[b.id] = Array(12).fill(false);
+        });
+      });
+      setUsage(initialUsage);
     }
   };
 
@@ -199,6 +224,14 @@ export default function App() {
     ));
   };
 
+  if (isAuthChecking) {
+    return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>Loading...</div>;
+  }
+
+  if (!user) {
+    return <LoginScreen />;
+  }
+
   return (
     <div className={`min-h-screen p-4 md:p-8 bg-slate-950 text-white font-sans`}>
       <header className="max-w-6xl mx-auto mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -227,11 +260,12 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <button onClick={resetData} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Clear Local Data"><RotateCcw size={20} /></button>
+          <button onClick={resetData} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Clear Progress"><RotateCcw size={20} /></button>
           <div className="flex bg-slate-900/50 backdrop-blur-md p-1 rounded-xl border border-slate-800">
             <button onClick={() => setActiveCard('platinum')} className={`px-8 py-2 rounded-lg font-medium transition-all ${activeCard === 'platinum' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>Platinum</button>
             <button onClick={() => setActiveCard('gold')} className={`px-8 py-2 rounded-lg font-medium transition-all ${activeCard === 'gold' ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>Gold</button>
           </div>
+          <button onClick={() => signOut(auth)} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Sign Out"><LogOut size={20} /></button>
         </div>
       </header>
 
@@ -304,10 +338,113 @@ export default function App() {
       <footer className="max-w-6xl mx-auto mt-12 pt-8 border-t border-slate-900/50 text-center text-slate-600 text-xs flex justify-between items-center">
         <p>© 2026 Amex Dashboard | Jayson Pitta</p>
         <div className="flex items-center gap-2">
-          <HardDrive className="text-slate-500" size={14} />
-          <span className="text-slate-500">Local Storage Active</span>
+          <HardDrive className="text-blue-500" size={14} />
+          <span className="text-blue-500">Cloud Sync Active</span>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLogin, setIsLogin] = useState(true);
+  const [error, setError] = useState('');
+
+  const handleEmailAuth = async (e) => {
+    e.preventDefault();
+    setError('');
+    try {
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        await createUserWithEmailAndPassword(auth, email, password);
+      }
+    } catch (err) {
+      setError(err.message.replace('Firebase: ', ''));
+    }
+  };
+
+  const handleGoogleAuth = async () => {
+    setError('');
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      setError(err.message.replace('Firebase: ', ''));
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+      <div className="w-full max-w-md bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-3xl p-8 shadow-2xl">
+        <div className="flex flex-col items-center mb-8">
+          <img src="/logo.png" alt="Amex Logo" className="w-20 h-20 object-contain rounded-2xl shadow-lg mb-4" />
+          <h2 className="text-2xl font-bold text-white">Benefit Tracker</h2>
+          <p className="text-slate-400 text-sm mt-1">{isLogin ? 'Sign in to access your data' : 'Create an account to start tracking'}</p>
+        </div>
+
+        {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm text-center">{error}</div>}
+
+        <form onSubmit={handleEmailAuth} className="space-y-4">
+          <div>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+              <input 
+                type="email" 
+                placeholder="Email address" 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+                required
+              />
+            </div>
+          </div>
+          <div>
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+              <input 
+                type="password" 
+                placeholder="Password" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+                required
+              />
+            </div>
+          </div>
+          
+          <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-blue-600/20">
+            {isLogin ? 'Sign In' : 'Create Account'}
+          </button>
+        </form>
+
+        <div className="mt-6 mb-6 relative flex items-center justify-center">
+          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-800"></div></div>
+          <span className="relative px-4 bg-slate-900/60 text-slate-500 text-sm">or</span>
+        </div>
+
+        <button 
+          onClick={handleGoogleAuth}
+          type="button"
+          className="w-full bg-slate-800 hover:bg-slate-700 text-white font-medium py-3 rounded-xl transition-colors border border-slate-700 flex items-center justify-center gap-2"
+        >
+          <svg className="w-5 h-5" viewBox="0 0 24 24">
+            <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+            <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+            <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+            <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+          </svg>
+          Continue with Google
+        </button>
+
+        <p className="mt-8 text-center text-sm text-slate-400">
+          {isLogin ? "Don't have an account? " : "Already have an account? "}
+          <button onClick={() => setIsLogin(!isLogin)} className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
+            {isLogin ? 'Sign up' : 'Sign in'}
+          </button>
+        </p>
+      </div>
     </div>
   );
 }
