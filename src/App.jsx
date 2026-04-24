@@ -205,25 +205,25 @@ export default function App() {
         <div className="flex items-center gap-4">
           <img src="/logo.png" alt="Amex Logo" className="w-16 h-16 object-contain rounded-2xl shadow-lg" />
           <div>
-            <h1 className="text-3xl font-bold tracking-tight mb-1">Benefit Tracker</h1>
+            <h1 className="text-3xl font-bold tracking-tight mb-1">Benefits Tracker</h1>
             <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setIsEditingYear(true)}>
               {isEditingYear ? (
-              <input
-                autoFocus
-                type="text"
-                value={trackingYear}
-                onChange={e => setTrackingYear(e.target.value)}
-                onBlur={() => setIsEditingYear(false)}
-                onKeyDown={e => e.key === 'Enter' && setIsEditingYear(false)}
-                className="bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-sm italic text-white outline-none w-24"
-              />
-            ) : (
-              <p className="text-slate-400 italic flex items-center gap-1.5 hover:text-slate-200 transition-colors">
-                Tracking {trackingYear} Refreshed Benefits
-                <span className="opacity-0 group-hover:opacity-50 transition-opacity"><Edit2 size={12} /></span>
-              </p>
-            )}
-          </div>
+                <input
+                  autoFocus
+                  type="text"
+                  value={trackingYear}
+                  onChange={e => setTrackingYear(e.target.value)}
+                  onBlur={() => setIsEditingYear(false)}
+                  onKeyDown={e => e.key === 'Enter' && setIsEditingYear(false)}
+                  className="bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-sm italic text-white outline-none w-24"
+                />
+              ) : (
+                <p className="text-slate-400 italic flex items-center gap-1.5 hover:text-slate-200 transition-colors">
+                  Tracking {trackingYear} Refreshed Benefits
+                  <span className="opacity-0 group-hover:opacity-50 transition-opacity"><Edit2 size={12} /></span>
+                </p>
+              )}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-4">
