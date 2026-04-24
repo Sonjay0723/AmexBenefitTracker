@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "npx rimraf release && vite build && electron-builder"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.2.4",
