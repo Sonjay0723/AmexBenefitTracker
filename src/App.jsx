@@ -205,7 +205,7 @@ export default function App() {
         <div className="flex items-center gap-4">
           <img src="/logo.png" alt="Amex Logo" className="w-16 h-16 object-contain rounded-2xl shadow-lg" />
           <div>
-            <h1 className="text-3xl font-bold tracking-tight mb-1">Benefits Tracker</h1>
+            <h1 className="text-3xl font-bold tracking-tight mb-1">Benefit Tracker</h1>
             <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setIsEditingYear(true)}>
               {isEditingYear ? (
                 <input
