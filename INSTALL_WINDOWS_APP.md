@@ -56,7 +56,7 @@ If you'd prefer to build from source:
 # Clone the repo and switch to this branch
 git clone https://github.com/Sonjay0723/AmexBenefitTracker.git
 cd AmexBenefitTracker
-git checkout windows-download
+git checkout windows-local-download
 
 # Install dependencies
 npm install
