@@ -70,8 +70,8 @@ export default function App() {
   const [trackingYear, setTrackingYear] = useState('2025');
   const [isEditingYear, setIsEditingYear] = useState(false);
   const [corpCreditSettings, setCorpCreditSettings] = useState({
-    platinum: { enabled: true },
-    gold: { enabled: true }
+    platinum: { enabled: false },
+    gold: { enabled: false }
   });
   const [isLoaded, setIsLoaded] = useState(false);
   const [user, setUser] = useState(null);
@@ -149,7 +149,7 @@ export default function App() {
   };
 
   const resetData = () => {
-    if (window.confirm("Are you sure you want to clear all your tracking progress? This cannot be undone.")) {
+    if (window.confirm("Are you sure you want to reset your tracking progress?")) {
       const initialUsage = {};
       Object.keys(INITIAL_DATA).forEach(cardKey => {
         INITIAL_DATA[cardKey].benefits.forEach(b => {
@@ -259,7 +259,7 @@ export default function App() {
         <div className="flex items-center gap-4">
           <img src="./logo.png" alt="Amex Logo" className="w-16 h-16 object-contain rounded-2xl shadow-lg" />
           <div>
-            <h1 className="text-3xl font-bold tracking-tight mb-1">Benefit Tracker</h1>
+            <h1 className="text-3xl font-bold tracking-tight mb-1">Amex Benefit Tracker</h1>
             <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setIsEditingYear(true)}>
               {isEditingYear ? (
                 <input
