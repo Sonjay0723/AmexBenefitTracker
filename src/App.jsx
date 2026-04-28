@@ -320,7 +320,7 @@ export default function App() {
 
           <div className={`p-8 rounded-3xl border shadow-xl transition-all ${stats.effectiveFee <= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-slate-900/60 border-slate-800'}`}>
             <div className="flex items-center justify-between mb-4">
-              <div className="p-2 rounded-lg bg-slate-800 text-blue-400"><TrendingUp size={20} /></div>
+              <div className={`p-2 rounded-lg bg-slate-800 ${currentCard.accent}`}><TrendingUp size={20} /></div>
               <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Effective Annual Fee</span>
             </div>
             <h2 className={`text-5xl font-black ${stats.effectiveFee <= 0 ? 'text-emerald-400' : 'text-white'}`}>
