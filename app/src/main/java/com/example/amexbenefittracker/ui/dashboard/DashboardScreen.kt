@@ -87,7 +87,6 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                 trackingYear = trackingYear,
                 isLandscape = isLandscape,
                 onCardSelected = { viewModel.selectCard(it) },
-                onYearChanged = { viewModel.setTrackingYear(it) },
                 onRefreshClick = { showResetDialog = true }
             )
         },
@@ -181,7 +180,6 @@ fun DashboardTopBar(
     trackingYear: String,
     isLandscape: Boolean,
     onCardSelected: (Long) -> Unit,
-    onYearChanged: (String) -> Unit,
     onRefreshClick: () -> Unit
 ) {
     Row(
@@ -214,7 +212,11 @@ fun DashboardTopBar(
                     fontWeight = FontWeight.Bold
                 )
                 
-                EditableYearSubheader(trackingYear, onYearChanged)
+                Text(
+                    text = "Tracking $trackingYear Refreshed Benefits",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Slate500
+                )
             }
         }
 
@@ -323,80 +325,6 @@ fun ResetConfirmationDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier.border(1.dp, Slate800, RoundedCornerShape(16.dp))
     )
-}
-
-@Composable
-fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit) {
-    var isEditing by remember { mutableStateOf(false) }
-    var editValue by remember(trackingYear) { mutableStateOf(trackingYear) }
-    val focusRequester = remember { FocusRequester() }
-    val focusManager = LocalFocusManager.current
-
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = "Tracking ",
-            style = MaterialTheme.typography.bodySmall,
-            color = Slate500
-        )
-        
-        if (isEditing) {
-            BasicTextField(
-                value = editValue,
-                onValueChange = { 
-                    if (it.length <= 4 && it.all { char -> char.isDigit() }) {
-                        editValue = it
-                    }
-                },
-                textStyle = TextStyle(
-                    color = TextWhite,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                ),
-                singleLine = true,
-                cursorBrush = SolidColor(TextWhite),
-                modifier = Modifier
-                    .width(IntrinsicSize.Min)
-                    .focusRequester(focusRequester)
-                    .onFocusChanged { 
-                        if (!it.isFocused && isEditing) {
-                            onYearChanged(editValue)
-                            isEditing = false
-                        }
-                    },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Number,
-                    imeAction = ImeAction.Done
-                ),
-                keyboardActions = KeyboardActions(
-                    onDone = {
-                        onYearChanged(editValue)
-                        isEditing = false
-                        focusManager.clearFocus()
-                    }
-                )
-            )
-            LaunchedEffect(Unit) {
-                focusRequester.requestFocus()
-            }
-        } else {
-            Text(
-                text = trackingYear,
-                style = MaterialTheme.typography.bodySmall,
-                color = Slate500,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { isEditing = true })
-                    }
-            )
-        }
-        
-        Text(
-            text = " Refreshed Benefits",
-            style = MaterialTheme.typography.bodySmall,
-            color = Slate500
-        )
-    }
 }
 
 @Composable
