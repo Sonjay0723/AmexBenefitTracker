@@ -8,10 +8,10 @@
             <InsightsFilterSettings>
               <option name="connection">
                 <ConnectionSetting>
-                  <option name="appId" value="PLACEHOLDER" />
-                  <option name="mobileSdkAppId" value="" />
-                  <option name="projectId" value="" />
-                  <option name="projectNumber" value="" />
+                  <option name="appId" value="com.example.amexbenefittracker" />
+                  <option name="mobileSdkAppId" value="1:443435413708:android:eb593c1be58ff2d9e95269" />
+                  <option name="projectId" value="amex-benefit-tracker" />
+                  <option name="projectNumber" value="443435413708" />
                 </ConnectionSetting>
               </option>
               <option name="signal" value="SIGNAL_UNSPECIFIED" />
