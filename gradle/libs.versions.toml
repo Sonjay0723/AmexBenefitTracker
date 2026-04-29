@@ -99,7 +99,7 @@ firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.r
 firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
 firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore" }
 firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics" }
-play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version = "21.3.0" }
+play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version = "21.5.1" }
 
 
 [plugins]
