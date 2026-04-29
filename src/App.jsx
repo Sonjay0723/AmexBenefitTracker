@@ -69,8 +69,7 @@ const INITIAL_DATA = {
 export default function App() {
   const [activeCard, setActiveCard] = useState('platinum');
   const [usage, setUsage] = useState({});
-  const [trackingYear, setTrackingYear] = useState('2025');
-  const [isEditingYear, setIsEditingYear] = useState(false);
+  const trackingYear = new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: 'America/New_York' }).format(new Date());
   const [corpCreditSettings, setCorpCreditSettings] = useState({
     platinum: { enabled: false },
     gold: { enabled: false }
@@ -94,7 +93,6 @@ export default function App() {
         if (docSnap.exists()) {
           const parsed = docSnap.data();
           if (parsed.usage) setUsage(parsed.usage);
-          if (parsed.trackingYear) setTrackingYear(parsed.trackingYear);
           if (parsed.corpCreditSettings) setCorpCreditSettings(parsed.corpCreditSettings);
         } else {
           const initialUsage = {};
@@ -120,11 +118,10 @@ export default function App() {
     if (isLoaded && user) {
       setDoc(doc(db, 'users', user.uid), {
         usage,
-        trackingYear,
         corpCreditSettings
       }, { merge: true });
     }
-  }, [usage, trackingYear, corpCreditSettings, isLoaded, user]);
+  }, [usage, corpCreditSettings, isLoaded, user]);
 
   const toggleMonth = (benefitId, monthIndex) => {
     setUsage(prev => {
@@ -268,24 +265,9 @@ export default function App() {
           <img src="./logo.png" alt="Amex Logo" className="w-16 h-16 object-contain rounded-2xl shadow-lg" />
           <div>
             <h1 className="text-3xl font-bold tracking-tight mb-1">Amex Benefit Tracker</h1>
-            <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setIsEditingYear(true)}>
-              {isEditingYear ? (
-                <input
-                  autoFocus
-                  type="text"
-                  value={trackingYear}
-                  onChange={e => setTrackingYear(e.target.value)}
-                  onBlur={() => setIsEditingYear(false)}
-                  onKeyDown={e => e.key === 'Enter' && setIsEditingYear(false)}
-                  className="bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-sm italic text-white outline-none w-24"
-                />
-              ) : (
-                <p className="text-slate-400 italic flex items-center gap-1.5 hover:text-slate-200 transition-colors">
-                  Tracking {trackingYear} Refreshed Benefits
-                  <span className="opacity-0 group-hover:opacity-50 transition-opacity"><Edit2 size={12} /></span>
-                </p>
-              )}
-            </div>
+            <p className="text-slate-400 italic">
+              Tracking {trackingYear} Refreshed Benefits
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-4">
