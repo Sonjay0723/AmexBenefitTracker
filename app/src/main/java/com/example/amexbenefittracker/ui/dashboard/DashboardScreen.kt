@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.*
@@ -46,11 +47,12 @@ import com.example.amexbenefittracker.data.local.entities.Benefit
 import com.example.amexbenefittracker.data.local.entities.BenefitType
 import com.example.amexbenefittracker.data.local.entities.Card
 import com.example.amexbenefittracker.domain.model.CardSummary
+import com.example.amexbenefittracker.ui.auth.AuthViewModel
 import com.example.amexbenefittracker.ui.theme.*
 import java.util.*
 
 @Composable
-fun DashboardScreen(viewModel: DashboardViewModel) {
+fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel) {
     val cards by viewModel.cards.collectAsState()
     val selectedCardId by viewModel.selectedCardId.collectAsState()
     val cardSummary by viewModel.cardSummary.collectAsState()
@@ -58,6 +60,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
     val trackingYear by viewModel.trackingYear.collectAsState()
 
     var showResetDialog by remember { mutableStateOf(false) }
+    var showSignOutDialog by remember { mutableStateOf(false) }
 
     val selectedCard = cards.find { it.id == selectedCardId }
     val isPlatinum = selectedCard?.name?.contains("Platinum") == true
@@ -77,6 +80,16 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
         )
     }
 
+    if (showSignOutDialog) {
+        SignOutConfirmationDialog(
+            onConfirm = {
+                authViewModel.signOut()
+                showSignOutDialog = false
+            },
+            onDismiss = { showSignOutDialog = false }
+        )
+    }
+
     Scaffold(
         topBar = {
             DashboardTopBar(
@@ -87,18 +100,25 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                 trackingYear = trackingYear,
                 isLandscape = isLandscape,
                 onCardSelected = { viewModel.selectCard(it) },
-                onRefreshClick = { showResetDialog = true }
+                onRefreshClick = { showResetDialog = true },
+                onSignOutClick = { showSignOutDialog = true }
             )
         },
         containerColor = Slate950,
-        modifier = Modifier.statusBarsPadding()
+        modifier = Modifier.safeDrawingPadding()
     ) { padding ->
+        val contentPadding = PaddingValues(
+            start = 16.dp,
+            top = 16.dp,
+            end = 16.dp, // End padding matches start padding
+            bottom = 16.dp
+        )
         if (isLandscape) {
             Row(
                 modifier = Modifier
                     .padding(padding)
                     .fillMaxSize()
-                    .padding(16.dp),
+                    .padding(contentPadding),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Left Column - Now Scrollable
@@ -145,7 +165,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                 modifier = Modifier
                     .padding(padding)
                     .fillMaxSize()
-                    .padding(16.dp),
+                    .padding(contentPadding),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 item {
@@ -180,53 +200,62 @@ fun DashboardTopBar(
     trackingYear: String,
     isLandscape: Boolean,
     onCardSelected: (Long) -> Unit,
-    onRefreshClick: () -> Unit
+    onRefreshClick: () -> Unit,
+    onSignOutClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 24.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // App Logo
-            Surface(
-                modifier = Modifier.size(56.dp),
-                color = Color.Transparent,
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.amex_logo),
-                    contentDescription = "App Logo",
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-            
-            Spacer(Modifier.width(16.dp))
-            Column {
-                Text(
-                    text = "Benefit Tracker",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = TextWhite,
-                    fontWeight = FontWeight.Bold
-                )
+    if (isLandscape) {
+        // Landscape TopBar layout
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 24.dp, end = 16.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // App Logo
+                Surface(
+                    modifier = Modifier.size(56.dp),
+                    color = Color.Transparent,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.amex_logo),
+                        contentDescription = "App Logo",
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
                 
-                Text(
-                    text = "Tracking $trackingYear Refreshed Benefits",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Slate500
-                )
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = "Benefit Tracker",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = TextWhite,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    Text(
+                        text = "Tracking $trackingYear Refreshed Benefits",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Slate500
+                    )
+                }
             }
-        }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onRefreshClick) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Slate500)
-            }
-            Spacer(Modifier.width(8.dp))
-            
-            if (isLandscape) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onRefreshClick) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Slate500)
+                }
+                
+                Spacer(Modifier.width(8.dp))
+
+                IconButton(onClick = onSignOutClick) {
+                    Icon(Icons.Default.ExitToApp, contentDescription = "Sign Out", tint = Slate500)
+                }
+
+                Spacer(Modifier.width(8.dp))
+
                 Row(
                     modifier = Modifier
                         .background(Slate900.copy(alpha = 0.6f), CircleShape)
@@ -251,39 +280,130 @@ fun DashboardTopBar(
                         }
                     }
                 }
-            } else {
-                // Vertical selector for Portrait
-                Column(
-                    modifier = Modifier
-                        .width(IntrinsicSize.Max)
-                        .background(Slate900.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-                        .border(1.dp, Slate800, RoundedCornerShape(12.dp))
-                        .padding(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    cards.sortedByDescending { it.name.contains("Platinum") }.forEach { card ->
-                        val isSelected = card.id == selectedCardId
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onCardSelected(card.id) },
-                            color = if (isSelected) accentBgColor else Color.Transparent,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                text = if (card.name.contains("Platinum")) "Platinum" else "Gold",
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                                color = TextWhite,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
+            }
+        }
+    } else {
+        // Vertical (Portrait) TopBar layout
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 24.dp, end = 16.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        modifier = Modifier.size(48.dp),
+                        color = Color.Transparent,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.amex_logo),
+                            contentDescription = "App Logo",
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Benefit Tracker",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = TextWhite,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Tracking $trackingYear Refreshed Benefits",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Slate500
+                        )
+                    }
+                }
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onRefreshClick) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Slate500)
+                    }
+                    IconButton(onClick = onSignOutClick) {
+                        Icon(Icons.Default.ExitToApp, contentDescription = "Sign Out", tint = Slate500)
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Slate900.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                    .border(1.dp, Slate800, RoundedCornerShape(12.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                cards.sortedByDescending { it.name.contains("Platinum") }.forEach { card ->
+                    val isSelected = card.id == selectedCardId
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onCardSelected(card.id) },
+                        color = if (isSelected) accentBgColor else Color.Transparent,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = if (card.name.contains("Platinum")) "Platinum" else "Gold",
+                            modifier = Modifier.padding(vertical = 12.dp),
+                            color = TextWhite,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+fun SignOutConfirmationDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Slate900,
+        title = {
+            Text(
+                "Amex Benefit Tracker",
+                color = TextWhite,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+        },
+        text = {
+            Text(
+                "Are you sure you want to sign out?",
+                color = Slate400,
+                fontSize = 14.sp
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = Red400),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss
+            ) {
+                Text("Cancel", color = Slate500, fontWeight = FontWeight.Bold)
+            }
+        },
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.border(1.dp, Slate800, RoundedCornerShape(16.dp))
+    )
 }
 
 @Composable

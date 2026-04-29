@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.room.Room
 import com.example.amexbenefittracker.data.local.AppDatabase
 import com.example.amexbenefittracker.data.local.DatabaseInitializer
+import com.example.amexbenefittracker.data.repository.AuthRepository
 import com.example.amexbenefittracker.data.repository.BenefitRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +26,8 @@ class AmexApplication : Application() {
             database.usageHistoryDao()
         )
     }
+
+    val authRepository by lazy { AuthRepository() }
 
     private val applicationScope = CoroutineScope(SupervisorJob())
 
