@@ -392,7 +392,7 @@ function LoginScreen() {
       <div className="w-full max-w-md bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-3xl p-8 shadow-2xl">
         <div className="flex flex-col items-center mb-8">
           <img src="./logo.png" alt="Amex Logo" className="w-20 h-20 object-contain rounded-2xl shadow-lg mb-4" />
-          <h2 className="text-2xl font-bold text-white">Benefit Tracker</h2>
+          <h2 className="text-2xl font-bold text-white">Amex Benefit Tracker</h2>
           <p className="text-slate-400 text-sm mt-1">{isLogin ? 'Sign in to access your data' : 'Create an account to start tracking'}</p>
         </div>
 
