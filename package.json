@@ -2,7 +2,7 @@
   "name": "amex-benefit-tracker",
   "productName": "Amex Benefit Tracker",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.9",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",

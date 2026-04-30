@@ -258,9 +258,13 @@ export default function App() {
     return <LoginScreen />;
   }
 
+  const scrollbarColors = activeCard === 'platinum' 
+    ? { '--scrollbar-thumb': '#2563eb', '--scrollbar-thumb-hover': '#3b82f6' } 
+    : { '--scrollbar-thumb': '#d97706', '--scrollbar-thumb-hover': '#f59e0b' };
+
   return (
-    <div className={`min-h-screen p-4 md:p-8 bg-slate-950 text-white font-sans`}>
-      <header className="max-w-6xl mx-auto mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
+    <div className={`min-h-screen lg:h-screen flex flex-col p-4 md:p-8 bg-slate-950 text-white font-sans lg:overflow-hidden`} style={scrollbarColors}>
+      <header className="max-w-6xl w-full mx-auto mb-8 shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="flex items-center gap-4">
           <img src="./logo.png" alt="Amex Logo" className="w-16 h-16 object-contain rounded-2xl shadow-lg" />
           <div>
@@ -272,16 +276,16 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4">
           <button onClick={resetData} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Clear Progress"><RotateCcw size={20} /></button>
+          <button onClick={handleSignOut} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Sign Out"><LogOut size={20} /></button>
           <div className="flex bg-slate-900/50 backdrop-blur-md p-1 rounded-xl border border-slate-800">
             <button onClick={() => setActiveCard('platinum')} className={`px-8 py-2 rounded-lg font-medium transition-all ${activeCard === 'platinum' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>Platinum</button>
             <button onClick={() => setActiveCard('gold')} className={`px-8 py-2 rounded-lg font-medium transition-all ${activeCard === 'gold' ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>Gold</button>
           </div>
-          <button onClick={handleSignOut} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Sign Out"><LogOut size={20} /></button>
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="space-y-6">
+      <div className="max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 min-h-0">
+        <div className="space-y-6 lg:overflow-y-auto lg:pr-2">
           <div className="bg-slate-900/40 backdrop-blur-sm border border-slate-800/50 p-8 rounded-3xl">
             <div className="flex items-center gap-3 mb-6">
               <span className={currentCard.accent}><CreditCard size={28} /></span>
@@ -323,7 +327,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="lg:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-4 lg:overflow-y-auto lg:pr-4 lg:pb-8">
           {stats.benefitStats.map(b => (
             <div key={b.id} className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-2xl overflow-hidden p-6 hover:border-slate-700 transition-colors">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
@@ -345,14 +349,6 @@ export default function App() {
           ))}
         </div>
       </div>
-
-      <footer className="max-w-6xl mx-auto mt-12 pt-8 border-t border-slate-900/50 text-center text-slate-600 text-xs flex justify-between items-center">
-        <p>© 2026 Amex Dashboard | Jayson Pitta</p>
-        <div className="flex items-center gap-2">
-          <HardDrive className="text-blue-500" size={14} />
-          <span className="text-blue-500">Cloud Sync Active</span>
-        </div>
-      </footer>
     </div>
   );
 }
