@@ -215,7 +215,7 @@ fun DashboardTopBar(
                 Spacer(Modifier.width(16.dp))
                 Column {
                     Text(
-                        text = "Benefit Tracker",
+                        text = "Amex Benefit Tracker",
                         style = MaterialTheme.typography.headlineMedium,
                         color = TextWhite,
                         fontWeight = FontWeight.Bold
@@ -296,7 +296,7 @@ fun DashboardTopBar(
                     Spacer(Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "Benefit Tracker",
+                            text = "Amex Benefit Tracker",
                             style = MaterialTheme.typography.titleLarge,
                             color = TextWhite,
                             fontWeight = FontWeight.Bold
