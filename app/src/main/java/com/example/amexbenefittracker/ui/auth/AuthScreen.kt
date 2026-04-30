@@ -131,14 +131,14 @@ fun AuthScreen(viewModel: AuthViewModel) {
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Divider(modifier = Modifier.weight(1f), color = Slate800)
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = Slate800)
                     Text(
                         text = "or",
                         color = Slate500,
                         modifier = Modifier.padding(horizontal = 16.dp),
                         fontSize = 12.sp
                     )
-                    Divider(modifier = Modifier.weight(1f), color = Slate800)
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = Slate800)
                 }
                 
                 Spacer(modifier = Modifier.height(24.dp))

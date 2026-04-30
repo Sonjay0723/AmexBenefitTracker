@@ -15,8 +15,8 @@ class AmexApplication : Application() {
         Room.databaseBuilder(
             this,
             AppDatabase::class.java,
-            AppDatabase.DATABASE_NAME
-        ).fallbackToDestructiveMigration().build()
+            AppDatabase.DATABASE_NAME,
+        ).fallbackToDestructiveMigration(dropAllTables = true).build()
     }
 
     val repository by lazy {

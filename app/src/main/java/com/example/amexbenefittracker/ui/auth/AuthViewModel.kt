@@ -2,14 +2,10 @@ package com.example.amexbenefittracker.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewModelScope
 import com.example.amexbenefittracker.data.repository.AuthRepository
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-
 class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
 
     val currentUser = authRepository.currentUser
