@@ -19,7 +19,7 @@ import kotlinx.coroutines.tasks.await
 class BenefitRepository(
     private val cardDao: CardDao,
     private val benefitDao: BenefitDao,
-    private val usageHistoryDao: UsageHistoryDao
+    private val usageHistoryDao: UsageHistoryDao,
 ) {
     private val firestore = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
@@ -149,7 +149,8 @@ class BenefitRepository(
                 }
 
                 // Restore Benefit History
-                val historyList = data["history"] as? List<Map<String, Any>> ?: emptyList()
+                @Suppress("UNCHECKED_CAST")
+                val historyList = (data["history"] as? List<Map<String, Any>>) ?: emptyList()
                 historyList.forEach { item ->
                     val bName = item["name"] as? String
                     val cName = item["card"] as? String
@@ -213,15 +214,19 @@ class BenefitRepository(
             val historyExport = mutableListOf<Map<String, Any>>()
             allUsage.forEach { usage ->
                 val benefit = benefitDao.getBenefitById(usage.benefitId)
-                val card = cards.find { it.id == benefit?.cardId }
-                if (benefit != null && card != null) {
-                    historyExport.add(mapOf(
-                        "name" to benefit.name,
-                        "card" to card.name,
-                        "period" to usage.periodIdentifier,
-                        "amount" to usage.amountClaimed,
-                        "date" to usage.dateClaimed
-                    ))
+                if (benefit != null) {
+                    val card = cards.find { it.id == benefit.cardId }
+                    if (card != null) {
+                        historyExport.add(
+                            mapOf(
+                                "name" to benefit.name,
+                                "card" to card.name,
+                                "period" to usage.periodIdentifier,
+                                "amount" to usage.amountClaimed,
+                                "date" to usage.dateClaimed,
+                            ),
+                        )
+                    }
                 }
             }
             // For Uber Cash, we only need to store it once in the cloud export to avoid bloat

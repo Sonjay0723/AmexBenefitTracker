@@ -5,8 +5,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.amexbenefittracker.data.local.entities.Benefit
 import com.example.amexbenefittracker.data.local.entities.BenefitType
-import com.example.amexbenefittracker.data.local.entities.Card
-import com.example.amexbenefittracker.data.local.entities.UsageHistory
 import com.example.amexbenefittracker.data.repository.BenefitRepository
 import com.example.amexbenefittracker.domain.model.CardSummary
 import kotlinx.coroutines.ExperimentalCoroutinesApi
