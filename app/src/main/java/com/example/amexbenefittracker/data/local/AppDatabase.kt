@@ -9,7 +9,7 @@ import com.example.amexbenefittracker.data.local.entities.Benefit
 import com.example.amexbenefittracker.data.local.entities.Card
 import com.example.amexbenefittracker.data.local.entities.UsageHistory
 
-@Database(entities = [Card::class, Benefit::class, UsageHistory::class], version = 3, exportSchema = false)
+@Database(entities = [Card::class, Benefit::class, UsageHistory::class], version = 5, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun cardDao(): CardDao
     abstract fun benefitDao(): BenefitDao

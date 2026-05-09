@@ -8,16 +8,22 @@ import com.example.amexbenefittracker.data.local.entities.BenefitType
 import com.example.amexbenefittracker.data.local.entities.Card
 import com.example.amexbenefittracker.data.local.entities.UsageHistory
 import com.example.amexbenefittracker.domain.model.CardSummary
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.tasks.await
 
 class BenefitRepository(
     private val cardDao: CardDao,
     private val benefitDao: BenefitDao,
     private val usageHistoryDao: UsageHistoryDao
 ) {
+    private val firestore = FirebaseFirestore.getInstance()
+    private val auth = FirebaseAuth.getInstance()
+
     fun getAllCards(): Flow<List<Card>> = cardDao.getAllCards()
 
     fun getBenefitsForCard(cardId: Long): Flow<List<Benefit>> = benefitDao.getBenefitsForCard(cardId)
@@ -98,12 +104,14 @@ class BenefitRepository(
                 }
             }
         }
+        syncLocalToFirestore()
     }
 
     suspend fun toggleCorporateCredit(cardId: Long) {
         val card = cardDao.getCardById(cardId)
         if (card != null) {
             cardDao.updateCard(card.copy(corporateCreditClaimed = !card.corporateCreditClaimed))
+            syncLocalToFirestore()
         }
     }
 
@@ -112,6 +120,120 @@ class BenefitRepository(
         val cards = cardDao.getAllCards().first()
         cards.forEach { card ->
             cardDao.updateCard(card.copy(corporateCreditClaimed = false))
+        }
+        
+        // Also clear cloud data
+        val userId = auth.currentUser?.uid ?: return
+        try {
+            firestore.collection("users").document(userId).delete().await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    suspend fun refreshData() {
+        val userId = auth.currentUser?.uid ?: return
+        try {
+            val snapshot = firestore.collection("users").document(userId).get().await()
+            if (snapshot.exists()) {
+                val data = snapshot.data ?: return
+                
+                // Clear local tracking before restoring
+                usageHistoryDao.deleteAllUsage()
+                
+                // Restore Corporate Credit Status
+                val cards = cardDao.getAllCards().first()
+                cards.forEach { card ->
+                    val claimed = (data["corp_credit_${card.name}"] as? Boolean) ?: false
+                    cardDao.updateCard(card.copy(corporateCreditClaimed = claimed))
+                }
+
+                // Restore Benefit History
+                val historyList = data["history"] as? List<Map<String, Any>> ?: emptyList()
+                historyList.forEach { item ->
+                    val bName = item["name"] as? String
+                    val cName = item["card"] as? String
+                    val pId = item["period"] as? String
+                    val amount = (item["amount"] as? Number)?.toDouble() ?: 0.0
+                    val date = (item["date"] as? Number)?.toLong() ?: 0L
+                    
+                    if (bName != null && pId != null) {
+                        if (bName == "Uber Cash") {
+                            // Link Uber Cash across all cards
+                            val benefits = benefitDao.getBenefitsByName(bName)
+                            benefits.forEach { b ->
+                                usageHistoryDao.insertUsage(
+                                    UsageHistory(
+                                        benefitId = b.id,
+                                        amountClaimed = if (pId.endsWith("-12")) b.decemberValue else b.monthlyValue,
+                                        dateClaimed = date,
+                                        periodIdentifier = pId
+                                    )
+                                )
+                            }
+                        } else {
+                            // Apply only to the specific card it was saved for
+                            val card = cards.find { it.name == cName }
+                            if (card != null) {
+                                val benefit = benefitDao.getBenefitsForCard(card.id).first().find { it.name == bName }
+                                if (benefit != null) {
+                                    usageHistoryDao.insertUsage(
+                                        UsageHistory(
+                                            benefitId = benefit.id,
+                                            amountClaimed = amount,
+                                            dateClaimed = date,
+                                            periodIdentifier = pId
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private suspend fun syncLocalToFirestore() {
+        val userId = auth.currentUser?.uid ?: return
+        try {
+            val cards = cardDao.getAllCards().first()
+            val allUsage = usageHistoryDao.getAllUsage().first()
+            
+            val data = mutableMapOf<String, Any>()
+            
+            // Sync Corporate Credits
+            cards.forEach { card ->
+                data["corp_credit_${card.name}"] = card.corporateCreditClaimed
+            }
+
+            // Sync History
+            val historyExport = mutableListOf<Map<String, Any>>()
+            allUsage.forEach { usage ->
+                val benefit = benefitDao.getBenefitById(usage.benefitId)
+                val card = cards.find { it.id == benefit?.cardId }
+                if (benefit != null && card != null) {
+                    historyExport.add(mapOf(
+                        "name" to benefit.name,
+                        "card" to card.name,
+                        "period" to usage.periodIdentifier,
+                        "amount" to usage.amountClaimed,
+                        "date" to usage.dateClaimed
+                    ))
+                }
+            }
+            // For Uber Cash, we only need to store it once in the cloud export to avoid bloat
+            // since it's linked during refresh anyway.
+            data["history"] = historyExport.distinctBy { 
+                if (it["name"] == "Uber Cash") "${it["name"]}_${it["period"]}" 
+                else "${it["name"]}_${it["card"]}_${it["period"]}"
+            }
+
+            firestore.collection("users").document(userId).set(data).await()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 

@@ -21,6 +21,9 @@ interface UsageHistoryDao {
     @Query("SELECT uh.* FROM usage_history uh INNER JOIN benefits b ON uh.benefitId = b.id WHERE b.cardId = :cardId")
     fun getUsageForCard(cardId: Long): Flow<List<UsageHistory>>
 
+    @Query("SELECT * FROM usage_history")
+    fun getAllUsage(): Flow<List<UsageHistory>>
+
     @Query("DELETE FROM usage_history")
     suspend fun deleteAllUsage()
 }

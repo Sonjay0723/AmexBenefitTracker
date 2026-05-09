@@ -19,10 +19,8 @@ class DashboardViewModel(private val repository: BenefitRepository) : ViewModel(
     private val _selectedCardId = MutableStateFlow<Long?>(null)
     val selectedCardId = _selectedCardId.asStateFlow()
 
-    val trackingYear: StateFlow<String> = flow {
-        val calendar = Calendar.getInstance(TimeZone.getTimeZone("America/New_York"))
-        emit(calendar.get(Calendar.YEAR).toString())
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, Calendar.getInstance(TimeZone.getTimeZone("America/New_York")).get(Calendar.YEAR).toString())
+    private val _trackingYear = MutableStateFlow(Calendar.getInstance(TimeZone.getTimeZone("America/New_York")).get(Calendar.YEAR).toString())
+    val trackingYear = _trackingYear.asStateFlow()
 
     val cards = repository.getAllCards().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -82,6 +80,10 @@ class DashboardViewModel(private val repository: BenefitRepository) : ViewModel(
         }
     }
 
+    fun setTrackingYear(year: String) {
+        _trackingYear.value = year
+    }
+
     fun toggleBenefit(benefit: Benefit, periodIdentifier: String? = null) {
         viewModelScope.launch {
             val period = periodIdentifier ?: getCurrentPeriod(benefit)
@@ -92,6 +94,12 @@ class DashboardViewModel(private val repository: BenefitRepository) : ViewModel(
     fun resetAllTracking() {
         viewModelScope.launch {
             repository.resetAllTracking()
+        }
+    }
+
+    fun refreshData() {
+        viewModelScope.launch {
+            repository.refreshData()
         }
     }
 

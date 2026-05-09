@@ -6,27 +6,41 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.amexbenefittracker.R
@@ -86,7 +100,9 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                 trackingYear = trackingYear,
                 isLandscape = isLandscape,
                 onCardSelected = { viewModel.selectCard(it) },
-                onRefreshClick = { showResetDialog = true },
+                onYearChanged = { viewModel.setTrackingYear(it) },
+                onRefreshClick = { viewModel.refreshData() },
+                onResetClick = { showResetDialog = true },
                 onSignOutClick = { showSignOutDialog = true }
             )
         },
@@ -96,7 +112,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
         val contentPadding = PaddingValues(
             start = 16.dp,
             top = 16.dp,
-            end = 16.dp, // End padding matches start padding
+            end = 16.dp,
             bottom = 16.dp
         )
         if (isLandscape) {
@@ -186,7 +202,9 @@ fun DashboardTopBar(
     trackingYear: String,
     isLandscape: Boolean,
     onCardSelected: (Long) -> Unit,
+    onYearChanged: (String) -> Unit,
     onRefreshClick: () -> Unit,
+    onResetClick: () -> Unit,
     onSignOutClick: () -> Unit
 ) {
     if (isLandscape) {
@@ -221,11 +239,7 @@ fun DashboardTopBar(
                         fontWeight = FontWeight.Bold
                     )
                     
-                    Text(
-                        text = "Tracking $trackingYear Refreshed Benefits",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Slate500
-                    )
+                    EditableYearSubheader(trackingYear, onYearChanged)
                 }
             }
 
@@ -234,6 +248,12 @@ fun DashboardTopBar(
                     Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Slate500)
                 }
                 
+                Spacer(Modifier.width(8.dp))
+
+                IconButton(onClick = onResetClick) {
+                    Icon(Icons.Default.History, contentDescription = "Reset Tracking", tint = Slate500)
+                }
+
                 Spacer(Modifier.width(8.dp))
 
                 IconButton(onClick = onSignOutClick) {
@@ -301,17 +321,16 @@ fun DashboardTopBar(
                             color = TextWhite,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            text = "Tracking $trackingYear Refreshed Benefits",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Slate500
-                        )
+                        EditableYearSubheader(trackingYear, onYearChanged)
                     }
                 }
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onRefreshClick) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Slate500)
+                    }
+                    IconButton(onClick = onResetClick) {
+                        Icon(Icons.Default.History, contentDescription = "Reset Tracking", tint = Slate500)
                     }
                     IconButton(onClick = onSignOutClick) {
                         Icon(Icons.Default.ExitToApp, contentDescription = "Sign Out", tint = Slate500)
@@ -780,5 +799,79 @@ fun HalfChip(label: String, isClaimed: Boolean, accentBgColor: Color, modifier: 
                 }
             }
         }
+    }
+}
+
+@Composable
+fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit) {
+    var isEditing by remember { mutableStateOf(false) }
+    var editValue by remember(trackingYear) { mutableStateOf(trackingYear) }
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = "Tracking ",
+            style = MaterialTheme.typography.bodySmall,
+            color = Slate500
+        )
+        
+        if (isEditing) {
+            BasicTextField(
+                value = editValue,
+                onValueChange = { 
+                    if (it.length <= 4 && it.all { char -> char.isDigit() }) {
+                        editValue = it
+                    }
+                },
+                textStyle = TextStyle(
+                    color = TextWhite,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                ),
+                singleLine = true,
+                cursorBrush = SolidColor(TextWhite),
+                modifier = Modifier
+                    .width(IntrinsicSize.Min)
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { 
+                        if (!it.isFocused && isEditing) {
+                            onYearChanged(editValue)
+                            isEditing = false
+                        }
+                    },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = {
+                        onYearChanged(editValue)
+                        isEditing = false
+                        focusManager.clearFocus()
+                    }
+                )
+            )
+            LaunchedEffect(Unit) {
+                focusRequester.requestFocus()
+            }
+        } else {
+            Text(
+                text = trackingYear,
+                style = MaterialTheme.typography.bodySmall,
+                color = Slate500,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .pointerInput(Unit) {
+                        detectTapGestures(onTap = { isEditing = true })
+                    }
+            )
+        }
+        
+        Text(
+            text = " Refreshed Benefits",
+            style = MaterialTheme.typography.bodySmall,
+            color = Slate500
+        )
     }
 }
