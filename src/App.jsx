@@ -240,59 +240,62 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Save to Firestore on change
-  useEffect(() => {
-    if (isLoaded && user) {
+  const toggleMonth = (benefitId, monthIndex) => {
+    const currentArr = usage[benefitId] || Array(12).fill(false);
+    const newVal = !currentArr[monthIndex];
+    const nextUsage = { ...usage };
+    nextUsage[benefitId] = currentArr.map((val, idx) => idx === monthIndex ? newVal : val);
+
+    // Link Uber Cash across cards
+    if (benefitId === 'p_uber' || benefitId === 'g_uber') {
+      const otherId = benefitId === 'p_uber' ? 'g_uber' : 'p_uber';
+      const otherArr = usage[otherId] || Array(12).fill(false);
+      nextUsage[otherId] = otherArr.map((val, idx) => idx === monthIndex ? newVal : val);
+    }
+
+    const currentTSArr = timestamps[benefitId] || Array(12).fill(null);
+    const nextTimestamps = { ...timestamps };
+    nextTimestamps[benefitId] = currentTSArr.map((val, idx) => 
+      idx === monthIndex ? (newVal ? Date.now() : null) : val
+    );
+
+    // Link Uber Cash timestamps
+    if (benefitId === 'p_uber' || benefitId === 'g_uber') {
+      const otherId = benefitId === 'p_uber' ? 'g_uber' : 'p_uber';
+      const otherArr = timestamps[otherId] || Array(12).fill(null);
+      nextTimestamps[otherId] = otherArr.map((val, idx) => 
+        idx === monthIndex ? (newVal ? Date.now() : null) : val
+      );
+    }
+
+    setUsage(nextUsage);
+    setTimestamps(nextTimestamps);
+
+    if (user) {
       setDoc(doc(db, 'users', user.uid), {
-        claims: serializeClaims(usage, timestamps, trackingYear),
+        claims: serializeClaims(nextUsage, nextTimestamps, trackingYear),
         corpCreditSettings
       }, { merge: true }).catch((err) => {
         console.error("Error saving user data to Firestore:", err);
       });
     }
-  }, [usage, timestamps, corpCreditSettings, isLoaded, user]);
-
-  const toggleMonth = (benefitId, monthIndex) => {
-    let newVal;
-    setUsage(prev => {
-      const currentArr = prev[benefitId] || Array(12).fill(false);
-      newVal = !currentArr[monthIndex];
-      const nextUsage = { ...prev };
-      nextUsage[benefitId] = currentArr.map((val, idx) => idx === monthIndex ? newVal : val);
-
-      // Link Uber Cash across cards
-      if (benefitId === 'p_uber' || benefitId === 'g_uber') {
-        const otherId = benefitId === 'p_uber' ? 'g_uber' : 'p_uber';
-        const otherArr = prev[otherId] || Array(12).fill(false);
-        nextUsage[otherId] = otherArr.map((val, idx) => idx === monthIndex ? newVal : val);
-      }
-      return nextUsage;
-    });
-
-    setTimestamps(prev => {
-      const currentArr = prev[benefitId] || Array(12).fill(null);
-      const nextTimestamps = { ...prev };
-      nextTimestamps[benefitId] = currentArr.map((val, idx) => 
-        idx === monthIndex ? (newVal ? Date.now() : null) : val
-      );
-
-      // Link Uber Cash timestamps
-      if (benefitId === 'p_uber' || benefitId === 'g_uber') {
-        const otherId = benefitId === 'p_uber' ? 'g_uber' : 'p_uber';
-        const otherArr = prev[otherId] || Array(12).fill(null);
-        nextTimestamps[otherId] = otherArr.map((val, idx) => 
-          idx === monthIndex ? (newVal ? Date.now() : null) : val
-        );
-      }
-      return nextTimestamps;
-    });
   };
 
   const toggleCorpCredit = () => {
-    setCorpCreditSettings(prev => ({
-      ...prev,
-      [activeCard]: { ...prev[activeCard], enabled: !prev[activeCard].enabled }
-    }));
+    const nextSettings = {
+      ...corpCreditSettings,
+      [activeCard]: { ...corpCreditSettings[activeCard], enabled: !corpCreditSettings[activeCard]?.enabled }
+    };
+    setCorpCreditSettings(nextSettings);
+
+    if (user) {
+      setDoc(doc(db, 'users', user.uid), {
+        claims: serializeClaims(usage, timestamps, trackingYear),
+        corpCreditSettings: nextSettings
+      }, { merge: true }).catch((err) => {
+        console.error("Error saving user data to Firestore:", err);
+      });
+    }
   };
 
   const refreshData = async () => {
