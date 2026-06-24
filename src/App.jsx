@@ -66,9 +66,168 @@ const INITIAL_DATA = {
   }
 };
 
+const BENEFIT_MAP = {
+  p_hotel: { card: 'platinum', path: ['hotel'], freq: 'semi' },
+  p_uber: { card: 'platinum', path: ['uber_cash'], freq: 'month' },
+  p_uber_one: { card: 'platinum', path: ['annual_credits', 'uber_one'], freq: 'annual' },
+  p_resy: { card: 'platinum', path: ['resy'], freq: 'quart' },
+  p_streaming: { card: 'platinum', path: ['entertainment'], freq: 'month' },
+  p_lulu: { card: 'platinum', path: ['lulu'], freq: 'quart' },
+  p_walmart: { card: 'platinum', path: ['annual_credits', 'walmart'], freq: 'annual' },
+  p_saks: { card: 'platinum', path: ['saks'], freq: 'semi' },
+  p_clear: { card: 'platinum', path: ['annual_credits', 'clear'], freq: 'annual' },
+  p_airline: { card: 'platinum', path: ['annual_credits', 'airline'], freq: 'annual' },
+  g_uber: { card: 'gold', path: ['uber_cash'], freq: 'month' },
+  g_dining: { card: 'gold', path: ['dining'], freq: 'month' },
+  g_dunkin: { card: 'gold', path: ['dunkin'], freq: 'month' },
+  g_resy: { card: 'gold', path: ['resy'], freq: 'semi' }
+};
+
+const getBenefitAmount = (benefitId, idx) => {
+  if (benefitId === 'p_uber') {
+    return idx === 11 ? 35 : 15;
+  }
+  for (const cardKey of ['platinum', 'gold']) {
+    const benefit = INITIAL_DATA[cardKey].benefits.find(b => b.id === benefitId);
+    if (benefit) {
+      if (benefit.freq === 'month') return benefit.total / 12;
+      if (benefit.freq === 'quart') return benefit.total / 4;
+      if (benefit.freq === 'semi') return benefit.total / 2;
+      if (benefit.freq === 'annual') return benefit.total;
+    }
+  }
+  return 0;
+};
+
+const deserializeClaims = (claims, year) => {
+  const usage = {};
+  const timestamps = {};
+  Object.keys(BENEFIT_MAP).forEach(benefitId => {
+    usage[benefitId] = Array(12).fill(false);
+    timestamps[benefitId] = Array(12).fill(null);
+  });
+  if (!claims) return { usage, timestamps };
+  Object.entries(BENEFIT_MAP).forEach(([benefitId, info]) => {
+    const { card, path, freq } = info;
+    const cardClaims = claims[card]?.[year];
+    if (!cardClaims) return;
+    if (freq === 'annual') {
+      const parentKey = path[0];
+      const leafKey = path[1];
+      const claim = cardClaims[parentKey]?.[leafKey];
+      if (claim) {
+        usage[benefitId][0] = true;
+        timestamps[benefitId][0] = claim.d || Date.now();
+      }
+    } else {
+      const parentKey = path[0];
+      const categoryClaims = cardClaims[parentKey];
+      if (!categoryClaims) return;
+      if (freq === 'month') {
+        for (let i = 0; i < 12; i++) {
+          const key = String(i + 1).padStart(2, '0');
+          const claim = categoryClaims[key];
+          if (claim) {
+            usage[benefitId][i] = true;
+            timestamps[benefitId][i] = claim.d || Date.now();
+          }
+        }
+      } else if (freq === 'quart') {
+        const quartIndices = [0, 3, 6, 9];
+        const quartKeys = ['Q1', 'Q2', 'Q3', 'Q4'];
+        quartKeys.forEach((key, qIdx) => {
+          const claim = categoryClaims[key];
+          if (claim) {
+            const monthIdx = quartIndices[qIdx];
+            usage[benefitId][monthIdx] = true;
+            timestamps[benefitId][monthIdx] = claim.d || Date.now();
+          }
+        });
+      } else if (freq === 'semi') {
+        const semiIndices = [0, 6];
+        const semiKeys = ['H1', 'H2'];
+        semiKeys.forEach((key, sIdx) => {
+          const claim = categoryClaims[key];
+          if (claim) {
+            const monthIdx = semiIndices[sIdx];
+            usage[benefitId][monthIdx] = true;
+            timestamps[benefitId][monthIdx] = claim.d || Date.now();
+          }
+        });
+      }
+    }
+  });
+  return { usage, timestamps };
+};
+
+const serializeClaims = (usage, timestamps, year) => {
+  const claims = {};
+  Object.entries(BENEFIT_MAP).forEach(([benefitId, info]) => {
+    const { card, path, freq } = info;
+    const usedArr = usage[benefitId] || Array(12).fill(false);
+    const tsArr = timestamps[benefitId] || Array(12).fill(null);
+    if (!claims[card]) claims[card] = {};
+    if (!claims[card][year]) claims[card][year] = {};
+    const cardClaims = claims[card][year];
+    if (freq === 'annual') {
+      if (usedArr[0]) {
+        const parentKey = path[0];
+        const leafKey = path[1];
+        if (!cardClaims[parentKey]) cardClaims[parentKey] = {};
+        cardClaims[parentKey][leafKey] = {
+          a: getBenefitAmount(benefitId, 0),
+          d: tsArr[0] || Date.now()
+        };
+      }
+    } else {
+      const parentKey = path[0];
+      if (freq === 'month') {
+        for (let i = 0; i < 12; i++) {
+          if (usedArr[i]) {
+            if (!cardClaims[parentKey]) cardClaims[parentKey] = {};
+            const key = String(i + 1).padStart(2, '0');
+            cardClaims[parentKey][key] = {
+              a: getBenefitAmount(benefitId, i),
+              d: tsArr[i] || Date.now()
+            };
+          }
+        }
+      } else if (freq === 'quart') {
+        const quartIndices = [0, 3, 6, 9];
+        const quartKeys = ['Q1', 'Q2', 'Q3', 'Q4'];
+        quartKeys.forEach((key, qIdx) => {
+          const monthIdx = quartIndices[qIdx];
+          if (usedArr[monthIdx]) {
+            if (!cardClaims[parentKey]) cardClaims[parentKey] = {};
+            cardClaims[parentKey][key] = {
+              a: getBenefitAmount(benefitId, monthIdx),
+              d: tsArr[monthIdx] || Date.now()
+            };
+          }
+        });
+      } else if (freq === 'semi') {
+        const semiIndices = [0, 6];
+        const semiKeys = ['H1', 'H2'];
+        semiKeys.forEach((key, sIdx) => {
+          const monthIdx = semiIndices[sIdx];
+          if (usedArr[monthIdx]) {
+            if (!cardClaims[parentKey]) cardClaims[parentKey] = {};
+            cardClaims[parentKey][key] = {
+              a: getBenefitAmount(benefitId, monthIdx),
+              d: tsArr[monthIdx] || Date.now()
+            };
+          }
+        });
+      }
+    }
+  });
+  return claims;
+};
+
 export default function App() {
   const [activeCard, setActiveCard] = useState('platinum');
   const [usage, setUsage] = useState({});
+  const [timestamps, setTimestamps] = useState({});
   const trackingYear = new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: 'America/New_York' }).format(new Date());
   const [corpCreditSettings, setCorpCreditSettings] = useState({
     platinum: { enabled: false },
@@ -86,28 +245,61 @@ export default function App() {
     }
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      if (currentUser) {
-        const docRef = doc(db, 'users', currentUser.uid);
-        const docSnap = await getDoc(docRef);
-        
-        if (docSnap.exists()) {
-          const parsed = docSnap.data();
-          if (parsed.usage) setUsage(parsed.usage);
-          if (parsed.corpCreditSettings) setCorpCreditSettings(parsed.corpCreditSettings);
-        } else {
-          const initialUsage = {};
-          Object.keys(INITIAL_DATA).forEach(cardKey => {
-            INITIAL_DATA[cardKey].benefits.forEach(b => {
-              initialUsage[b.id] = Array(12).fill(false);
+      try {
+        if (currentUser) {
+          const docRef = doc(db, 'users', currentUser.uid);
+          const docSnap = await getDoc(docRef);
+          
+          if (docSnap.exists()) {
+            const parsed = docSnap.data();
+            let loadedUsage = {};
+            let loadedTimestamps = {};
+            if (parsed.claims) {
+              const deserialized = deserializeClaims(parsed.claims, trackingYear);
+              loadedUsage = deserialized.usage;
+              loadedTimestamps = deserialized.timestamps;
+            } else if (parsed.usage) {
+              loadedUsage = parsed.usage;
+              Object.keys(BENEFIT_MAP).forEach(benefitId => {
+                loadedTimestamps[benefitId] = Array(12).fill(null);
+                if (parsed.usage[benefitId]) {
+                  parsed.usage[benefitId].forEach((val, idx) => {
+                    if (val) loadedTimestamps[benefitId][idx] = Date.now();
+                  });
+                }
+              });
+            } else {
+              Object.keys(INITIAL_DATA).forEach(cardKey => {
+                INITIAL_DATA[cardKey].benefits.forEach(b => {
+                  loadedUsage[b.id] = Array(12).fill(false);
+                  loadedTimestamps[b.id] = Array(12).fill(null);
+                });
+              });
+            }
+            setUsage(loadedUsage);
+            setTimestamps(loadedTimestamps);
+          } else {
+            const initialUsage = {};
+            const initialTimestamps = {};
+            Object.keys(INITIAL_DATA).forEach(cardKey => {
+              INITIAL_DATA[cardKey].benefits.forEach(b => {
+                initialUsage[b.id] = Array(12).fill(false);
+                initialTimestamps[b.id] = Array(12).fill(null);
+              });
             });
-          });
-          setUsage(initialUsage);
+            setUsage(initialUsage);
+            setTimestamps(initialTimestamps);
+          }
+          setIsLoaded(true);
+        } else {
+          setIsLoaded(false);
         }
-        setIsLoaded(true);
-      } else {
+      } catch (err) {
+        console.error("Error loading user data from Firestore:", err);
         setIsLoaded(false);
+      } finally {
+        setIsAuthChecking(false);
       }
-      setIsAuthChecking(false);
     });
 
     return () => unsubscribe();
@@ -117,16 +309,19 @@ export default function App() {
   useEffect(() => {
     if (isLoaded && user) {
       setDoc(doc(db, 'users', user.uid), {
-        usage,
+        claims: serializeClaims(usage, timestamps, trackingYear),
         corpCreditSettings
-      }, { merge: true });
+      }, { merge: true }).catch((err) => {
+        console.error("Error saving user data to Firestore:", err);
+      });
     }
-  }, [usage, corpCreditSettings, isLoaded, user]);
+  }, [usage, timestamps, corpCreditSettings, isLoaded, user]);
 
   const toggleMonth = (benefitId, monthIndex) => {
+    let newVal;
     setUsage(prev => {
       const currentArr = prev[benefitId] || Array(12).fill(false);
-      const newVal = !currentArr[monthIndex];
+      newVal = !currentArr[monthIndex];
       const nextUsage = { ...prev };
       nextUsage[benefitId] = currentArr.map((val, idx) => idx === monthIndex ? newVal : val);
 
@@ -138,6 +333,24 @@ export default function App() {
       }
       return nextUsage;
     });
+
+    setTimestamps(prev => {
+      const currentArr = prev[benefitId] || Array(12).fill(null);
+      const nextTimestamps = { ...prev };
+      nextTimestamps[benefitId] = currentArr.map((val, idx) => 
+        idx === monthIndex ? (newVal ? Date.now() : null) : val
+      );
+
+      // Link Uber Cash timestamps
+      if (benefitId === 'p_uber' || benefitId === 'g_uber') {
+        const otherId = benefitId === 'p_uber' ? 'g_uber' : 'p_uber';
+        const otherArr = prev[otherId] || Array(12).fill(null);
+        nextTimestamps[otherId] = otherArr.map((val, idx) => 
+          idx === monthIndex ? (newVal ? Date.now() : null) : val
+        );
+      }
+      return nextTimestamps;
+    });
   };
 
   const toggleCorpCredit = () => {
@@ -147,15 +360,36 @@ export default function App() {
     }));
   };
 
-  const resetData = () => {
-    if (window.confirm("Are you sure you want to reset your tracking progress?")) {
-      const initialUsage = {};
-      Object.keys(INITIAL_DATA).forEach(cardKey => {
-        INITIAL_DATA[cardKey].benefits.forEach(b => {
-          initialUsage[b.id] = Array(12).fill(false);
-        });
-      });
-      setUsage(initialUsage);
+  const refreshData = async () => {
+    if (!user) return;
+    try {
+      const docRef = doc(db, 'users', user.uid);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const parsed = docSnap.data();
+        let loadedUsage = {};
+        let loadedTimestamps = {};
+        if (parsed.claims) {
+          const deserialized = deserializeClaims(parsed.claims, trackingYear);
+          loadedUsage = deserialized.usage;
+          loadedTimestamps = deserialized.timestamps;
+        } else if (parsed.usage) {
+          loadedUsage = parsed.usage;
+          Object.keys(BENEFIT_MAP).forEach(benefitId => {
+            loadedTimestamps[benefitId] = Array(12).fill(null);
+            if (parsed.usage[benefitId]) {
+              parsed.usage[benefitId].forEach((val, idx) => {
+                if (val) loadedTimestamps[benefitId][idx] = Date.now();
+              });
+            }
+          });
+        }
+        setUsage(loadedUsage);
+        setTimestamps(loadedTimestamps);
+        if (parsed.corpCreditSettings) setCorpCreditSettings(parsed.corpCreditSettings);
+      }
+    } catch (err) {
+      console.error('Failed to refresh data:', err);
     }
   };
 
@@ -275,7 +509,7 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <button onClick={resetData} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Clear Progress"><RotateCcw size={20} /></button>
+          <button onClick={refreshData} className="p-2 text-slate-600 hover:text-blue-400 transition-colors" title="Refresh from Cloud"><RotateCcw size={20} /></button>
           <button onClick={handleSignOut} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Sign Out"><LogOut size={20} /></button>
           <div className="flex bg-slate-900/50 backdrop-blur-md p-1 rounded-xl border border-slate-800">
             <button onClick={() => setActiveCard('platinum')} className={`px-8 py-2 rounded-lg font-medium transition-all ${activeCard === 'platinum' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>Platinum</button>
