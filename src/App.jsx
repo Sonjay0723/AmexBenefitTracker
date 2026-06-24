@@ -99,127 +99,62 @@ const getBenefitAmount = (benefitId, idx) => {
   return 0;
 };
 
+const getPeriodInfo = (freq, path) => {
+  if (freq === 'annual') return { keys: [path[1]], indices: [0] };
+  if (freq === 'quart') return { keys: ['Q1', 'Q2', 'Q3', 'Q4'], indices: [0, 3, 6, 9] };
+  if (freq === 'semi') return { keys: ['H1', 'H2'], indices: [0, 6] };
+  return { keys: Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')), indices: Array.from({ length: 12 }, (_, i) => i) };
+};
+
 const deserializeClaims = (claims, year) => {
-  const usage = {};
-  const timestamps = {};
-  Object.keys(BENEFIT_MAP).forEach(benefitId => {
-    usage[benefitId] = Array(12).fill(false);
-    timestamps[benefitId] = Array(12).fill(null);
+  const usage = {}, timestamps = {};
+  Object.keys(BENEFIT_MAP).forEach(id => {
+    usage[id] = Array(12).fill(false);
+    timestamps[id] = Array(12).fill(null);
   });
   if (!claims) return { usage, timestamps };
-  Object.entries(BENEFIT_MAP).forEach(([benefitId, info]) => {
-    const { card, path, freq } = info;
+
+  Object.entries(BENEFIT_MAP).forEach(([benefitId, { card, path, freq }]) => {
     const cardClaims = claims[card]?.[year];
     if (!cardClaims) return;
-    if (freq === 'annual') {
-      const parentKey = path[0];
-      const leafKey = path[1];
-      const claim = cardClaims[parentKey]?.[leafKey];
+    const parentKey = path[0];
+    const categoryClaims = cardClaims[parentKey];
+    if (!categoryClaims) return;
+
+    const { keys, indices } = getPeriodInfo(freq, path);
+    keys.forEach((key, kIdx) => {
+      const claim = categoryClaims[key];
       if (claim) {
-        usage[benefitId][0] = true;
-        timestamps[benefitId][0] = claim.d || Date.now();
+        const monthIdx = indices[kIdx];
+        usage[benefitId][monthIdx] = true;
+        timestamps[benefitId][monthIdx] = claim.d || Date.now();
       }
-    } else {
-      const parentKey = path[0];
-      const categoryClaims = cardClaims[parentKey];
-      if (!categoryClaims) return;
-      if (freq === 'month') {
-        for (let i = 0; i < 12; i++) {
-          const key = String(i + 1).padStart(2, '0');
-          const claim = categoryClaims[key];
-          if (claim) {
-            usage[benefitId][i] = true;
-            timestamps[benefitId][i] = claim.d || Date.now();
-          }
-        }
-      } else if (freq === 'quart') {
-        const quartIndices = [0, 3, 6, 9];
-        const quartKeys = ['Q1', 'Q2', 'Q3', 'Q4'];
-        quartKeys.forEach((key, qIdx) => {
-          const claim = categoryClaims[key];
-          if (claim) {
-            const monthIdx = quartIndices[qIdx];
-            usage[benefitId][monthIdx] = true;
-            timestamps[benefitId][monthIdx] = claim.d || Date.now();
-          }
-        });
-      } else if (freq === 'semi') {
-        const semiIndices = [0, 6];
-        const semiKeys = ['H1', 'H2'];
-        semiKeys.forEach((key, sIdx) => {
-          const claim = categoryClaims[key];
-          if (claim) {
-            const monthIdx = semiIndices[sIdx];
-            usage[benefitId][monthIdx] = true;
-            timestamps[benefitId][monthIdx] = claim.d || Date.now();
-          }
-        });
-      }
-    }
+    });
   });
   return { usage, timestamps };
 };
 
 const serializeClaims = (usage, timestamps, year) => {
   const claims = {};
-  Object.entries(BENEFIT_MAP).forEach(([benefitId, info]) => {
-    const { card, path, freq } = info;
+  Object.entries(BENEFIT_MAP).forEach(([benefitId, { card, path, freq }]) => {
     const usedArr = usage[benefitId] || Array(12).fill(false);
     const tsArr = timestamps[benefitId] || Array(12).fill(null);
-    if (!claims[card]) claims[card] = {};
-    if (!claims[card][year]) claims[card][year] = {};
-    const cardClaims = claims[card][year];
-    if (freq === 'annual') {
-      if (usedArr[0]) {
+    const { keys, indices } = getPeriodInfo(freq, path);
+
+    indices.forEach((monthIdx, kIdx) => {
+      if (usedArr[monthIdx]) {
+        if (!claims[card]) claims[card] = {};
+        if (!claims[card][year]) claims[card][year] = {};
+        const cardClaims = claims[card][year];
         const parentKey = path[0];
-        const leafKey = path[1];
         if (!cardClaims[parentKey]) cardClaims[parentKey] = {};
-        cardClaims[parentKey][leafKey] = {
-          a: getBenefitAmount(benefitId, 0),
-          d: tsArr[0] || Date.now()
+        
+        cardClaims[parentKey][keys[kIdx]] = {
+          a: getBenefitAmount(benefitId, monthIdx),
+          d: tsArr[monthIdx] || Date.now()
         };
       }
-    } else {
-      const parentKey = path[0];
-      if (freq === 'month') {
-        for (let i = 0; i < 12; i++) {
-          if (usedArr[i]) {
-            if (!cardClaims[parentKey]) cardClaims[parentKey] = {};
-            const key = String(i + 1).padStart(2, '0');
-            cardClaims[parentKey][key] = {
-              a: getBenefitAmount(benefitId, i),
-              d: tsArr[i] || Date.now()
-            };
-          }
-        }
-      } else if (freq === 'quart') {
-        const quartIndices = [0, 3, 6, 9];
-        const quartKeys = ['Q1', 'Q2', 'Q3', 'Q4'];
-        quartKeys.forEach((key, qIdx) => {
-          const monthIdx = quartIndices[qIdx];
-          if (usedArr[monthIdx]) {
-            if (!cardClaims[parentKey]) cardClaims[parentKey] = {};
-            cardClaims[parentKey][key] = {
-              a: getBenefitAmount(benefitId, monthIdx),
-              d: tsArr[monthIdx] || Date.now()
-            };
-          }
-        });
-      } else if (freq === 'semi') {
-        const semiIndices = [0, 6];
-        const semiKeys = ['H1', 'H2'];
-        semiKeys.forEach((key, sIdx) => {
-          const monthIdx = semiIndices[sIdx];
-          if (usedArr[monthIdx]) {
-            if (!cardClaims[parentKey]) cardClaims[parentKey] = {};
-            cardClaims[parentKey][key] = {
-              a: getBenefitAmount(benefitId, monthIdx),
-              d: tsArr[monthIdx] || Date.now()
-            };
-          }
-        });
-      }
-    }
+    });
   });
   return claims;
 };
