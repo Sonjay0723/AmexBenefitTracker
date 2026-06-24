@@ -103,9 +103,15 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 
                 Spacer(modifier = Modifier.height(24.dp))
                 
-                // Sign In Button
+                // Sign In / Sign Up Button
                 Button(
-                    onClick = { viewModel.signInWithEmail(email, password) },
+                    onClick = {
+                        if (isSignUp) {
+                            viewModel.signUpWithEmail(email, password)
+                        } else {
+                            viewModel.signInWithEmail(email, password)
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),

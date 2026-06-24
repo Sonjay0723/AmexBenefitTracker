@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.example.amexbenefittracker.data.repository.AuthRepository
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
@@ -24,7 +25,6 @@ class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
         _errorMessage.value = null
     }
 
-    // Basic Email Sign In Placeholder (Logic to be expanded)
     fun signInWithEmail(email: String, pass: String) {
         if (email.isEmpty() || pass.isEmpty()) {
             _errorMessage.value = "Please fill in all fields"
@@ -33,9 +33,55 @@ class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
         _isLoading.value = true
         FirebaseAuth.getInstance().signInWithEmailAndPassword(email, pass)
             .addOnCompleteListener { task ->
-                _isLoading.value = false
-                if (!task.isSuccessful) {
+                if (task.isSuccessful) {
+                    val uid = task.result?.user?.uid ?: return@addOnCompleteListener
+                    // Check if user exists in Firestore
+                    FirebaseFirestore.getInstance().collection("users").document(uid).get()
+                        .addOnCompleteListener { dbTask ->
+                            _isLoading.value = false
+                            if (dbTask.isSuccessful) {
+                                if (!dbTask.result!!.exists()) {
+                                    authRepository.signOut()
+                                    _errorMessage.value = "User account not found in database"
+                                }
+                                // If exists, AuthRepository's StateFlow will update the UI
+                            } else {
+                                authRepository.signOut()
+                                _errorMessage.value = "Database connection failed: ${dbTask.exception?.message}"
+                            }
+                        }
+                } else {
+                    _isLoading.value = false
                     _errorMessage.value = task.exception?.message ?: "Sign in failed"
+                }
+            }
+    }
+
+    fun signUpWithEmail(email: String, pass: String) {
+        if (email.isEmpty() || pass.isEmpty()) {
+            _errorMessage.value = "Please fill in all fields"
+            return
+        }
+        _isLoading.value = true
+        FirebaseAuth.getInstance().createUserWithEmailAndPassword(email, pass)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    val uid = task.result?.user?.uid ?: return@addOnCompleteListener
+                    val userMap = hashMapOf(
+                        "email" to email,
+                        "createdAt" to System.currentTimeMillis()
+                    )
+                    
+                    FirebaseFirestore.getInstance().collection("users").document(uid).set(userMap)
+                        .addOnCompleteListener { dbTask ->
+                            _isLoading.value = false
+                            if (!dbTask.isSuccessful) {
+                                _errorMessage.value = "Failed to create user profile: ${dbTask.exception?.message}"
+                            }
+                        }
+                } else {
+                    _isLoading.value = false
+                    _errorMessage.value = task.exception?.message ?: "Sign up failed"
                 }
             }
     }
