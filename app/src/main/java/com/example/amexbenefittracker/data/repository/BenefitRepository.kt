@@ -10,16 +10,19 @@ import com.example.amexbenefittracker.data.local.entities.UsageHistory
 import com.example.amexbenefittracker.domain.model.CardSummary
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 class BenefitRepository(
     private val cardDao: CardDao,
     private val benefitDao: BenefitDao,
     private val usageHistoryDao: UsageHistoryDao,
+    private val externalScope: CoroutineScope,
 ) {
     private val firestore = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
@@ -104,30 +107,36 @@ class BenefitRepository(
                 }
             }
         }
-        syncLocalToFirestore()
+        externalScope.launch {
+            syncLocalToFirestore()
+        }
     }
 
     suspend fun toggleCorporateCredit(cardId: Long) {
         val card = cardDao.getCardById(cardId)
         if (card != null) {
             cardDao.updateCard(card.copy(corporateCreditClaimed = !card.corporateCreditClaimed))
-            syncLocalToFirestore()
+            externalScope.launch {
+                syncLocalToFirestore()
+            }
         }
     }
 
     suspend fun resetAllTracking() {
         usageHistoryDao.deleteAllUsage()
-        val cards = cardDao.getAllCards().first()
+        val cards = cardDao.getAllCardsDirect()
         cards.forEach { card ->
             cardDao.updateCard(card.copy(corporateCreditClaimed = false))
         }
         
         // Also clear cloud data
         val userId = auth.currentUser?.uid ?: return
-        try {
-            firestore.collection("users").document(userId).delete().await()
-        } catch (e: Exception) {
-            e.printStackTrace()
+        externalScope.launch {
+            try {
+                firestore.collection("users").document(userId).delete().await()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -142,7 +151,7 @@ class BenefitRepository(
                 usageHistoryDao.deleteAllUsage()
                 
                 // Restore Corporate Credit Status
-                val cards = cardDao.getAllCards().first()
+                val cards = cardDao.getAllCardsDirect()
                 cards.forEach { card ->
                     val claimed = (data["corp_credit_${card.name}"] as? Boolean) ?: false
                     cardDao.updateCard(card.copy(corporateCreditClaimed = claimed))
@@ -176,7 +185,7 @@ class BenefitRepository(
                             // Apply only to the specific card it was saved for
                             val card = cards.find { it.name == cName }
                             if (card != null) {
-                                val benefit = benefitDao.getBenefitsForCard(card.id).first().find { it.name == bName }
+                                val benefit = benefitDao.getBenefitsForCardDirect(card.id).find { it.name == bName }
                                 if (benefit != null) {
                                     usageHistoryDao.insertUsage(
                                         UsageHistory(
@@ -200,8 +209,8 @@ class BenefitRepository(
     private suspend fun syncLocalToFirestore() {
         val userId = auth.currentUser?.uid ?: return
         try {
-            val cards = cardDao.getAllCards().first()
-            val allUsage = usageHistoryDao.getAllUsage().first()
+            val cards = cardDao.getAllCardsDirect()
+            val allUsage = usageHistoryDao.getAllUsageDirect()
             
             val data = mutableMapOf<String, Any>()
             

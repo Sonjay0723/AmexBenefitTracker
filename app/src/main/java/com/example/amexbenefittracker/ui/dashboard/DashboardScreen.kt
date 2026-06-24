@@ -1,6 +1,7 @@
 package com.example.amexbenefittracker.ui.dashboard
 
 import android.content.res.Configuration
+import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -18,12 +19,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CreditCard
-import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -58,13 +59,19 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
     val cardSummary by viewModel.cardSummary.collectAsState()
     val benefits by viewModel.benefits.collectAsState()
     val trackingYear by viewModel.trackingYear.collectAsState()
+    val currentUser by authViewModel.currentUser.collectAsState()
+
+    LaunchedEffect(currentUser) {
+        if (currentUser != null) {
+            viewModel.refreshData()
+        }
+    }
 
     var showResetDialog by remember { mutableStateOf(false) }
     var showSignOutDialog by remember { mutableStateOf(false) }
 
     val selectedCard = cards.find { it.id == selectedCardId }
     val isPlatinum = selectedCard?.name?.contains("Platinum") == true
-    val accentTextColor = if (isPlatinum) Blue400 else Amber400
     val accentBgColor = if (isPlatinum) Blue600 else Amber600
 
     val configuration = LocalConfiguration.current
@@ -95,7 +102,6 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
             DashboardTopBar(
                 cards = cards,
                 selectedCardId = selectedCardId,
-                accentTextColor = accentTextColor,
                 accentBgColor = accentBgColor,
                 trackingYear = trackingYear,
                 isLandscape = isLandscape,
@@ -115,78 +121,108 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
             end = 16.dp,
             bottom = 16.dp
         )
-        if (isLandscape) {
-            Row(
-                modifier = Modifier
-                    .padding(padding)
-                    .fillMaxSize()
-                    .padding(contentPadding),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // Left Column - Now Scrollable
-                Column(
-                    modifier = Modifier
-                        .weight(1.2f)
-                        .fillMaxHeight()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    cardSummary?.let { summary ->
-                        CardDetailsSection(summary, accentTextColor) {
-                            viewModel.toggleCorporateCredit()
-                        }
-                        EffectiveFeeSection(summary, accentTextColor)
-                    }
-                }
 
-                // Right Column
-                Column(
+        AnimatedContent(
+            targetState = selectedCardId,
+            transitionSpec = {
+                // Determine slide direction based on which card is selected
+                // Assuming cards[0] is Platinum and cards[1] is Gold
+                val initialIndex = cards.indexOfFirst { it.id == initialState }
+                val targetIndex = cards.indexOfFirst { it.id == targetState }
+                
+                if (targetIndex > initialIndex) {
+                    // Slide left (Gold is "after" Platinum)
+                    (slideInHorizontally { width -> width } + fadeIn()).togetherWith(
+                        slideOutHorizontally { width -> -width } + fadeOut())
+                } else {
+                    // Slide right
+                    (slideInHorizontally { width -> -width } + fadeIn()).togetherWith(
+                        slideOutHorizontally { width -> width } + fadeOut())
+                }.using(
+                    SizeTransform(clip = false)
+                )
+            },
+            label = "TabSwitch"
+        ) { targetId ->
+            // Re-calculate derived states for the specific targetId inside AnimatedContent
+            val selectedCard = cards.find { it.id == targetId }
+            val isPlatinum = selectedCard?.name?.contains("Platinum") == true
+            val accentTextColor = if (isPlatinum) Blue400 else Amber400
+            val accentBgColor = if (isPlatinum) Blue600 else Amber600
+
+            if (isLandscape) {
+                Row(
                     modifier = Modifier
-                        .weight(2f)
-                        .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        .padding(padding)
+                        .fillMaxSize()
+                        .padding(contentPadding),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.fillMaxSize()
+                    // Left Column - Now Scrollable
+                    Column(
+                        modifier = Modifier
+                            .weight(1.2f)
+                            .fillMaxHeight()
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        items(benefits) { benefitUi ->
-                            BenefitCard(
-                                uiModel = benefitUi,
-                                accentBgColor = accentBgColor,
-                                accentTextColor = accentTextColor,
-                                onToggle = { period -> viewModel.toggleBenefit(benefitUi.benefit, period) }
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-            // Vertical Layout for Mobile
-            LazyColumn(
-                modifier = Modifier
-                    .padding(padding)
-                    .fillMaxSize()
-                    .padding(contentPadding),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                item {
-                    cardSummary?.let { summary ->
-                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        cardSummary?.let { summary ->
                             CardDetailsSection(summary, accentTextColor) {
                                 viewModel.toggleCorporateCredit()
                             }
                             EffectiveFeeSection(summary, accentTextColor)
                         }
                     }
+
+                    // Right Column
+                    Column(
+                        modifier = Modifier
+                            .weight(2f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(benefits) { benefitUi ->
+                                BenefitCard(
+                                    uiModel = benefitUi,
+                                    accentBgColor = accentBgColor,
+                                    accentTextColor = accentTextColor,
+                                    onToggle = { period -> viewModel.toggleBenefit(benefitUi.benefit, period) }
+                                )
+                            }
+                        }
+                    }
                 }
-                items(benefits) { benefitUi ->
-                    BenefitCard(
-                        uiModel = benefitUi,
-                        accentBgColor = accentBgColor,
-                        accentTextColor = accentTextColor,
-                        onToggle = { period -> viewModel.toggleBenefit(benefitUi.benefit, period) }
-                    )
+            } else {
+                // Vertical Layout for Mobile
+                LazyColumn(
+                    modifier = Modifier
+                        .padding(padding)
+                        .fillMaxSize()
+                        .padding(contentPadding),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    item {
+                        cardSummary?.let { summary ->
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                CardDetailsSection(summary, accentTextColor) {
+                                    viewModel.toggleCorporateCredit()
+                                }
+                                EffectiveFeeSection(summary, accentTextColor)
+                            }
+                        }
+                    }
+                    items(benefits) { benefitUi ->
+                        BenefitCard(
+                            uiModel = benefitUi,
+                            accentBgColor = accentBgColor,
+                            accentTextColor = accentTextColor,
+                            onToggle = { period -> viewModel.toggleBenefit(benefitUi.benefit, period) }
+                        )
+                    }
                 }
             }
         }
@@ -197,7 +233,6 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
 fun DashboardTopBar(
     cards: List<Card>,
     selectedCardId: Long?,
-    accentTextColor: Color,
     accentBgColor: Color,
     trackingYear: String,
     isLandscape: Boolean,
@@ -257,7 +292,7 @@ fun DashboardTopBar(
                 Spacer(Modifier.width(8.dp))
 
                 IconButton(onClick = onSignOutClick) {
-                    Icon(Icons.Default.ExitToApp, contentDescription = "Sign Out", tint = Slate500)
+                    Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Sign Out", tint = Slate500)
                 }
 
                 Spacer(Modifier.width(8.dp))
@@ -333,7 +368,7 @@ fun DashboardTopBar(
                         Icon(Icons.Default.History, contentDescription = "Reset Tracking", tint = Slate500)
                     }
                     IconButton(onClick = onSignOutClick) {
-                        Icon(Icons.Default.ExitToApp, contentDescription = "Sign Out", tint = Slate500)
+                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Sign Out", tint = Slate500)
                     }
                 }
             }
@@ -491,7 +526,7 @@ fun EffectiveFeeSection(summary: CardSummary, accentTextColor: Color) {
                     modifier = Modifier.size(40.dp).background(Slate900.copy(alpha = 0.6f), RoundedCornerShape(8.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.TrendingUp, contentDescription = null, tint = accentTextColor, modifier = Modifier.size(20.dp))
+                    Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = accentTextColor, modifier = Modifier.size(20.dp))
                 }
                 Text("EFFECTIVE ANNUAL FEE", style = MaterialTheme.typography.labelSmall, color = Slate500, fontWeight = FontWeight.Bold)
             }

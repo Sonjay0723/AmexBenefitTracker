@@ -24,6 +24,9 @@ interface UsageHistoryDao {
     @Query("SELECT * FROM usage_history")
     fun getAllUsage(): Flow<List<UsageHistory>>
 
+    @Query("SELECT * FROM usage_history")
+    suspend fun getAllUsageDirect(): List<UsageHistory>
+
     @Query("DELETE FROM usage_history")
     suspend fun deleteAllUsage()
 }

@@ -7,6 +7,7 @@ import com.example.amexbenefittracker.data.local.DatabaseInitializer
 import com.example.amexbenefittracker.data.repository.AuthRepository
 import com.example.amexbenefittracker.data.repository.BenefitRepository
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
@@ -23,13 +24,14 @@ class AmexApplication : Application() {
         BenefitRepository(
             database.cardDao(),
             database.benefitDao(),
-            database.usageHistoryDao()
+            database.usageHistoryDao(),
+            applicationScope
         )
     }
 
     val authRepository by lazy { AuthRepository() }
 
-    private val applicationScope = CoroutineScope(SupervisorJob())
+    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()

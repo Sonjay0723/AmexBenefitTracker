@@ -9,6 +9,9 @@ interface BenefitDao {
     @Query("SELECT * FROM benefits WHERE cardId = :cardId ORDER BY displayOrder ASC")
     fun getBenefitsForCard(cardId: Long): Flow<List<Benefit>>
 
+    @Query("SELECT * FROM benefits WHERE cardId = :cardId ORDER BY displayOrder ASC")
+    suspend fun getBenefitsForCardDirect(cardId: Long): List<Benefit>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBenefit(benefit: Benefit): Long
 
