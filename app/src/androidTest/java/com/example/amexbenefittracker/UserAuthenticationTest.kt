@@ -125,15 +125,27 @@ class UserAuthenticationTest {
         val remoteData = documentSnapshot.data
         assertNotNull("Remote data should not be null", remoteData)
 
-        // Verify history list matches what was toggled
+        // Verify claims map matches what was toggled
         @Suppress("UNCHECKED_CAST")
-        val historyList = remoteData?.get("history") as? List<Map<String, Any>>
-        assertNotNull("History list in Firestore should not be null", historyList)
-        assertFalse("History list in Firestore should not be empty", historyList!!.isEmpty())
+        val claims = remoteData?.get("claims") as? Map<String, Any>
+        assertNotNull("Claims map in Firestore should not be null", claims)
 
-        val syncedBenefit = historyList.find { it["name"] == "Test Uber Cash" }
-        assertNotNull("Synced benefit 'Test Uber Cash' should exist in Firestore", syncedBenefit)
-        assertEquals("Synced period mismatch", periodIdentifier, syncedBenefit?.get("period"))
-        assertEquals("Synced amount mismatch", 15.0, (syncedBenefit?.get("amount") as? Number)?.toDouble())
+        @Suppress("UNCHECKED_CAST")
+        val cardClaims = claims["test_platinum_card"] as? Map<String, Any>
+        assertNotNull("test_platinum_card claims should exist in Firestore", cardClaims)
+
+        @Suppress("UNCHECKED_CAST")
+        val yearClaims = cardClaims["2026"] as? Map<String, Any>
+        assertNotNull("2026 claims should exist in Firestore", yearClaims)
+
+        @Suppress("UNCHECKED_CAST")
+        val benefitClaims = yearClaims["test_uber_cash"] as? Map<String, Any>
+        assertNotNull("test_uber_cash claims should exist in Firestore", benefitClaims)
+
+        @Suppress("UNCHECKED_CAST")
+        val periodClaims = benefitClaims["06"] as? Map<String, Any>
+        assertNotNull("06 claims should exist in Firestore", periodClaims)
+
+        assertEquals("Synced amount mismatch", 15.0, (periodClaims["a"] as? Number)?.toDouble())
     }
 }
