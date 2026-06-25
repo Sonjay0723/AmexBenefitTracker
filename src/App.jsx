@@ -193,7 +193,11 @@ export default function App() {
   const [activeCard, setActiveCard] = useState('platinum');
   const [usage, setUsage] = useState({});
   const [timestamps, setTimestamps] = useState({});
-  const trackingYear = new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: 'America/New_York' }).format(new Date());
+  const currentSystemYear = new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: 'America/New_York' }).format(new Date());
+  const [trackingYear, setTrackingYear] = useState(currentSystemYear);
+  const [isEditingYear, setIsEditingYear] = useState(false);
+  const [editYearValue, setEditYearValue] = useState(currentSystemYear);
+  const [allClaims, setAllClaims] = useState({});
   const [corpCreditSettings, setCorpCreditSettings] = useState({
     platinum: { enabled: false },
     gold: { enabled: false }
@@ -219,10 +223,15 @@ export default function App() {
           
           if (docSnap.exists()) {
             const parsed = docSnap.data();
+            const yearToUse = parsed.tracking_year || currentSystemYear;
+            setTrackingYear(yearToUse);
+            setEditYearValue(yearToUse);
+            setAllClaims(parsed.claims || {});
+
             let loadedUsage = {};
             let loadedTimestamps = {};
             if (parsed.claims) {
-              const deserialized = deserializeClaims(parsed.claims, trackingYear);
+              const deserialized = deserializeClaims(parsed.claims, yearToUse);
               loadedUsage = deserialized.usage;
               loadedTimestamps = deserialized.timestamps;
             } else if (parsed.usage) {
@@ -279,6 +288,42 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  const updateLocalClaims = (nextUsage, nextTimestamps) => {
+    const newClaims = serializeClaims(nextUsage, nextTimestamps, trackingYear);
+    setAllClaims(prevClaims => {
+      const merged = { ...prevClaims };
+      Object.keys(newClaims).forEach(cardKey => {
+        merged[cardKey] = {
+          ...merged[cardKey],
+          [trackingYear]: newClaims[cardKey][trackingYear]
+        };
+      });
+      return merged;
+    });
+  };
+
+  const handleYearSave = () => {
+    setIsEditingYear(false);
+    if (!editYearValue || !/^\d+$/.test(editYearValue)) {
+      setEditYearValue(trackingYear);
+      return;
+    }
+    const newYear = editYearValue;
+    setTrackingYear(newYear);
+    
+    const deserialized = deserializeClaims(allClaims, newYear);
+    setUsage(deserialized.usage);
+    setTimestamps(deserialized.timestamps);
+
+    if (user) {
+      setDoc(doc(db, 'users', user.uid), {
+        tracking_year: newYear
+      }, { merge: true }).catch((err) => {
+        console.error("Error saving tracking year to Firestore:", err);
+      });
+    }
+  };
+
   const toggleMonth = (benefitId, monthIndex) => {
     const currentArr = usage[benefitId] || Array(12).fill(false);
     const newVal = !currentArr[monthIndex];
@@ -309,6 +354,7 @@ export default function App() {
 
     setUsage(nextUsage);
     setTimestamps(nextTimestamps);
+    updateLocalClaims(nextUsage, nextTimestamps);
 
     if (user) {
       setDoc(doc(db, 'users', user.uid), {
@@ -327,6 +373,7 @@ export default function App() {
       [activeCard]: { ...corpCreditSettings[activeCard], enabled: !corpCreditSettings[activeCard]?.enabled }
     };
     setCorpCreditSettings(nextSettings);
+    updateLocalClaims(usage, timestamps);
 
     if (user) {
       setDoc(doc(db, 'users', user.uid), {
@@ -346,10 +393,15 @@ export default function App() {
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         const parsed = docSnap.data();
+        const yearToUse = parsed.tracking_year || currentSystemYear;
+        setTrackingYear(yearToUse);
+        setEditYearValue(yearToUse);
+        setAllClaims(parsed.claims || {});
+
         let loadedUsage = {};
         let loadedTimestamps = {};
         if (parsed.claims) {
-          const deserialized = deserializeClaims(parsed.claims, trackingYear);
+          const deserialized = deserializeClaims(parsed.claims, yearToUse);
           loadedUsage = deserialized.usage;
           loadedTimestamps = deserialized.timestamps;
         } else if (parsed.usage) {
@@ -517,7 +569,39 @@ export default function App() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight mb-1">Amex Benefit Tracker</h1>
             <p className="text-slate-400 italic">
-              Tracking {trackingYear} Refreshed Benefits
+              Tracking{' '}
+              {isEditingYear ? (
+                <input
+                  type="text"
+                  value={editYearValue}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (/^\d*$/.test(val)) {
+                      setEditYearValue(val);
+                    }
+                  }}
+                  onBlur={handleYearSave}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleYearSave();
+                    }
+                  }}
+                  className="w-16 bg-slate-900 border border-slate-700 rounded px-1 text-center text-white font-bold inline focus:outline-none focus:border-blue-500"
+                  autoFocus
+                />
+              ) : (
+                <span
+                  onDoubleClick={() => {
+                    setEditYearValue(trackingYear);
+                    setIsEditingYear(true);
+                  }}
+                  className="font-bold text-white hover:text-blue-400 transition-colors cursor-pointer select-none"
+                  title="Double click to edit year"
+                >
+                  {trackingYear}
+                </span>
+              )}{' '}
+              Refreshed Benefits
             </p>
           </div>
         </div>
