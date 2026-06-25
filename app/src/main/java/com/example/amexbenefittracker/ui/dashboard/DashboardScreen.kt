@@ -1,8 +1,6 @@
 package com.example.amexbenefittracker.ui.dashboard
 
 import android.content.res.Configuration
-import androidx.activity.compose.BackHandler
-import kotlinx.coroutines.launch
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
