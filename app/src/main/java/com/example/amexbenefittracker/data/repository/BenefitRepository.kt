@@ -11,12 +11,11 @@ import com.example.amexbenefittracker.domain.model.CardSummary
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.Calendar
+import java.util.TimeZone
 
 class BenefitRepository(
     private val cardDao: CardDao,
@@ -26,6 +25,13 @@ class BenefitRepository(
 ) {
     private val firestore = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
+
+    private val _trackingYear = MutableStateFlow(Calendar.getInstance().get(Calendar.YEAR).toString())
+    val trackingYear: StateFlow<String> = _trackingYear.asStateFlow()
+
+    fun setTrackingYear(year: String) {
+        _trackingYear.value = year
+    }
 
     fun getAllCards(): Flow<List<Card>> = cardDao.getAllCards()
 
@@ -149,6 +155,7 @@ class BenefitRepository(
                 
                 // Restore tracking year
                 val cloudYear = data["tracking_year"] as? String
+                cloudYear?.let { setTrackingYear(it) }
                 
                 // Clear local tracking before restoring
                 usageHistoryDao.deleteAllUsage()
@@ -277,6 +284,7 @@ class BenefitRepository(
     }
 
     suspend fun updateTrackingYear(year: String) {
+        setTrackingYear(year)
         val userId = auth.currentUser?.uid ?: return
         try {
             firestore.collection("users").document(userId).update("tracking_year", year).await()
@@ -299,10 +307,7 @@ class BenefitRepository(
                 data["corp_credit_${card.name}"] = card.corporateCreditClaimed
             }
 
-            // Sync Tracking Year (local VM state might not be available here, but we can assume)
-            // This sync method is used for benefit toggles too. 
-            // In a real app, trackingYear might be in a PreferenceDataStore.
-            // For now, we'll keep it as is.
+            data["tracking_year"] = trackingYear.value
 
             // Hierarchical Claims structure
             val claims = mutableMapOf<String, Any>()

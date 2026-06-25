@@ -17,6 +17,9 @@ class DashboardViewModel(private val repository: BenefitRepository) : ViewModel(
     private val _selectedCardId = MutableStateFlow<Long?>(null)
     val selectedCardId = _selectedCardId.asStateFlow()
 
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing = _isRefreshing.asStateFlow()
+
     val trackingYear = repository.trackingYear
 
     val cards = repository.getAllCards().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -79,7 +82,9 @@ class DashboardViewModel(private val repository: BenefitRepository) : ViewModel(
     }
 
     fun setTrackingYear(year: String) {
-        repository.setTrackingYear(year)
+        viewModelScope.launch {
+            repository.updateTrackingYear(year)
+        }
     }
 
     fun toggleBenefit(benefit: Benefit, periodIdentifier: String? = null) {
@@ -97,7 +102,9 @@ class DashboardViewModel(private val repository: BenefitRepository) : ViewModel(
 
     fun refreshData() {
         viewModelScope.launch {
+            _isRefreshing.value = true
             repository.refreshData()
+            _isRefreshing.value = false
         }
     }
 

@@ -1,12 +1,16 @@
 package com.example.amexbenefittracker.ui.dashboard
 
 import android.content.res.Configuration
+import androidx.activity.compose.BackHandler
+import kotlinx.coroutines.launch
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,6 +30,7 @@ import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +42,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +58,7 @@ import com.example.amexbenefittracker.ui.auth.AuthViewModel
 import com.example.amexbenefittracker.ui.theme.*
 import java.util.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel) {
     val cards by viewModel.cards.collectAsState()
@@ -60,6 +67,8 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
     val benefits by viewModel.benefits.collectAsState()
     val trackingYear by viewModel.trackingYear.collectAsState()
     val currentUser by authViewModel.currentUser.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val focusManager = LocalFocusManager.current
 
     LaunchedEffect(currentUser) {
         if (currentUser != null) {
@@ -107,13 +116,18 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                 isLandscape = isLandscape,
                 onCardSelected = { viewModel.selectCard(it) },
                 onYearChanged = { viewModel.setTrackingYear(it) },
-                onRefreshClick = { viewModel.refreshData() },
                 onResetClick = { showResetDialog = true },
                 onSignOutClick = { showSignOutDialog = true }
             )
         },
         containerColor = Slate950,
-        modifier = Modifier.safeDrawingPadding()
+        modifier = Modifier
+            .safeDrawingPadding()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = {
+                    focusManager.clearFocus()
+                })
+            }
     ) { padding ->
         val contentPadding = PaddingValues(
             start = 16.dp,
@@ -122,108 +136,104 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
             bottom = 16.dp
         )
 
-        AnimatedContent(
-            targetState = selectedCardId,
-            transitionSpec = {
-                // Determine slide direction based on which card is selected
-                // Assuming cards[0] is Platinum and cards[1] is Gold
-                val initialIndex = cards.indexOfFirst { it.id == initialState }
-                val targetIndex = cards.indexOfFirst { it.id == targetState }
-                
-                if (targetIndex > initialIndex) {
-                    // Slide left (Gold is "after" Platinum)
-                    (slideInHorizontally { width -> width } + fadeIn()).togetherWith(
-                        slideOutHorizontally { width -> -width } + fadeOut())
-                } else {
-                    // Slide right
-                    (slideInHorizontally { width -> -width } + fadeIn()).togetherWith(
-                        slideOutHorizontally { width -> width } + fadeOut())
-                }.using(
-                    SizeTransform(clip = false)
-                )
-            },
-            label = "TabSwitch"
-        ) { targetId ->
-            // Re-calculate derived states for the specific targetId inside AnimatedContent
-            val selectedCard = cards.find { it.id == targetId }
-            val isPlatinum = selectedCard?.name?.contains("Platinum") == true
-            val accentTextColor = if (isPlatinum) Blue400 else Amber400
-            val accentBgColor = if (isPlatinum) Blue600 else Amber600
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { viewModel.refreshData() },
+            modifier = Modifier.padding(padding).fillMaxSize()
+        ) {
+            AnimatedContent(
+                targetState = selectedCardId,
+                transitionSpec = {
+                    val initialIndex = cards.indexOfFirst { it.id == initialState }
+                    val targetIndex = cards.indexOfFirst { it.id == targetState }
+                    
+                    if (targetIndex > initialIndex) {
+                        (slideInHorizontally { width -> width } + fadeIn()).togetherWith(
+                            slideOutHorizontally { width -> -width } + fadeOut())
+                    } else {
+                        (slideInHorizontally { width -> -width } + fadeIn()).togetherWith(
+                            slideOutHorizontally { width -> width } + fadeOut())
+                    }.using(
+                        SizeTransform(clip = false)
+                    )
+                },
+                label = "TabSwitch"
+            ) { targetId ->
+                val selectedCard = cards.find { it.id == targetId }
+                val isPlatinum = selectedCard?.name?.contains("Platinum") == true
+                val accentTextColor = if (isPlatinum) Blue400 else Amber400
+                val accentBgColor = if (isPlatinum) Blue600 else Amber600
 
-            if (isLandscape) {
-                Row(
-                    modifier = Modifier
-                        .padding(padding)
-                        .fillMaxSize()
-                        .padding(contentPadding),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // Left Column - Now Scrollable
-                    Column(
+                if (isLandscape) {
+                    Row(
                         modifier = Modifier
-                            .weight(1.2f)
-                            .fillMaxHeight()
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                            .fillMaxSize()
+                            .padding(contentPadding),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        cardSummary?.let { summary ->
-                            CardDetailsSection(summary, accentTextColor) {
-                                viewModel.toggleCorporateCredit()
-                            }
-                            EffectiveFeeSection(summary, accentTextColor)
-                        }
-                    }
-
-                    // Right Column
-                    Column(
-                        modifier = Modifier
-                            .weight(2f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier.fillMaxSize()
+                        Column(
+                            modifier = Modifier
+                                .weight(1.2f)
+                                .fillMaxHeight()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            items(benefits) { benefitUi ->
-                                BenefitCard(
-                                    uiModel = benefitUi,
-                                    trackingYear = trackingYear,
-                                    accentBgColor = accentBgColor,
-                                    accentTextColor = accentTextColor,
-                                    onToggle = { period -> viewModel.toggleBenefit(benefitUi.benefit, period) }
-                                )
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Vertical Layout for Mobile
-                LazyColumn(
-                    modifier = Modifier
-                        .padding(padding)
-                        .fillMaxSize()
-                        .padding(contentPadding),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    item {
-                        cardSummary?.let { summary ->
-                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            cardSummary?.let { summary ->
                                 CardDetailsSection(summary, accentTextColor) {
                                     viewModel.toggleCorporateCredit()
                                 }
                                 EffectiveFeeSection(summary, accentTextColor)
                             }
                         }
+
+                        Column(
+                            modifier = Modifier
+                                .weight(2f)
+                                .fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                items(benefits) { benefitUi ->
+                                    BenefitCard(
+                                        uiModel = benefitUi,
+                                        trackingYear = trackingYear,
+                                        accentBgColor = accentBgColor,
+                                        accentTextColor = accentTextColor,
+                                        onToggle = { period -> viewModel.toggleBenefit(benefitUi.benefit, period) }
+                                    )
+                                }
+                            }
+                        }
                     }
-                    items(benefits) { benefitUi ->
-                        BenefitCard(
-                            uiModel = benefitUi,
-                            trackingYear = trackingYear,
-                            accentBgColor = accentBgColor,
-                            accentTextColor = accentTextColor,
-                            onToggle = { period -> viewModel.toggleBenefit(benefitUi.benefit, period) }
-                        )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(contentPadding),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        item {
+                            cardSummary?.let { summary ->
+                                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    CardDetailsSection(summary, accentTextColor) {
+                                        viewModel.toggleCorporateCredit()
+                                    }
+                                    EffectiveFeeSection(summary, accentTextColor)
+                                }
+                            }
+                        }
+                        items(benefits) { benefitUi ->
+                            BenefitCard(
+                                uiModel = benefitUi,
+                                trackingYear = trackingYear,
+                                accentBgColor = accentBgColor,
+                                accentTextColor = accentTextColor,
+                                onToggle = { period -> viewModel.toggleBenefit(benefitUi.benefit, period) }
+                            )
+                        }
                     }
                 }
             }
@@ -240,12 +250,10 @@ fun DashboardTopBar(
     isLandscape: Boolean,
     onCardSelected: (Long) -> Unit,
     onYearChanged: (String) -> Unit,
-    onRefreshClick: () -> Unit,
     onResetClick: () -> Unit,
     onSignOutClick: () -> Unit
 ) {
     if (isLandscape) {
-        // Landscape TopBar layout
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -254,7 +262,6 @@ fun DashboardTopBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // App Logo
                 Surface(
                     modifier = Modifier.size(56.dp),
                     color = Color.Transparent,
@@ -273,32 +280,23 @@ fun DashboardTopBar(
                         text = "Amex Benefit Tracker",
                         style = MaterialTheme.typography.headlineMedium,
                         color = TextWhite,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
-                    
                     EditableYearSubheader(trackingYear, onYearChanged)
                 }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onRefreshClick) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Slate500)
-                }
-                
-                Spacer(Modifier.width(8.dp))
-
                 IconButton(onClick = onResetClick) {
                     Icon(Icons.Default.History, contentDescription = "Reset Tracking", tint = Slate500)
                 }
-
                 Spacer(Modifier.width(8.dp))
-
                 IconButton(onClick = onSignOutClick) {
                     Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Sign Out", tint = Slate500)
                 }
-
                 Spacer(Modifier.width(8.dp))
-
                 Row(
                     modifier = Modifier
                         .background(Slate900.copy(alpha = 0.6f), CircleShape)
@@ -326,7 +324,6 @@ fun DashboardTopBar(
             }
         }
     } else {
-        // Vertical (Portrait) TopBar layout
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -338,7 +335,7 @@ fun DashboardTopBar(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     Surface(
                         modifier = Modifier.size(48.dp),
                         color = Color.Transparent,
@@ -354,18 +351,17 @@ fun DashboardTopBar(
                     Column {
                         Text(
                             text = "Amex Benefit Tracker",
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
                             color = TextWhite,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                         EditableYearSubheader(trackingYear, onYearChanged)
                     }
                 }
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onRefreshClick) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Slate500)
-                    }
                     IconButton(onClick = onResetClick) {
                         Icon(Icons.Default.History, contentDescription = "Reset Tracking", tint = Slate500)
                     }
@@ -412,35 +408,16 @@ fun SignOutConfirmationDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Slate900,
-        title = {
-            Text(
-                "Amex Benefit Tracker",
-                color = TextWhite,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-        },
-        text = {
-            Text(
-                "Are you sure you want to sign out?",
-                color = Slate400,
-                fontSize = 14.sp
-            )
-        },
+        title = { Text("Sign Out", color = TextWhite, fontWeight = FontWeight.Bold) },
+        text = { Text("Are you sure you want to sign out?", color = Slate400) },
         confirmButton = {
-            Button(
-                onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(containerColor = Red400),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
+            Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = Red400)) {
+                Text("OK", color = Color.White)
             }
         },
         dismissButton = {
-            TextButton(
-                onClick = onDismiss
-            ) {
-                Text("Cancel", color = Slate500, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Slate500)
             }
         },
         shape = RoundedCornerShape(16.dp),
@@ -453,35 +430,16 @@ fun ResetConfirmationDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Slate900,
-        title = {
-            Text(
-                "Amex Benefit Tracker",
-                color = TextWhite,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-        },
-        text = {
-            Text(
-                "Are you sure you want to reset your tracking progress?",
-                color = Slate400,
-                fontSize = 14.sp
-            )
-        },
+        title = { Text("Reset Progress", color = TextWhite, fontWeight = FontWeight.Bold) },
+        text = { Text("Are you sure you want to reset your tracking progress?", color = Slate400) },
         confirmButton = {
-            Button(
-                onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(containerColor = Red400),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
+            Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = Red400)) {
+                Text("OK", color = Color.White)
             }
         },
         dismissButton = {
-            TextButton(
-                onClick = onDismiss
-            ) {
-                Text("Cancel", color = Slate500, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Slate500)
             }
         },
         shape = RoundedCornerShape(16.dp),
@@ -497,12 +455,23 @@ fun CardDetailsSection(summary: CardSummary, accentTextColor: Color, onToggleCor
         modifier = Modifier.fillMaxWidth().border(1.dp, Slate800, RoundedCornerShape(24.dp))
     ) {
         Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                 Icon(Icons.Default.CreditCard, contentDescription = null, tint = accentTextColor, modifier = Modifier.size(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = summary.cardName,
+                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 19.sp),
+                    fontWeight = FontWeight.Bold,
+                    color = TextWhite,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(Icons.Default.CreditCard, contentDescription = null, tint = accentTextColor)
             }
-            
-            Text(summary.cardName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TextWhite)
-
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 DetailRow("Standard Annual Fee", "$${summary.standardAnnualFee.toInt()}")
                 if (summary.corporateCredit > 0) {
@@ -523,18 +492,11 @@ fun EffectiveFeeSection(summary: CardSummary, accentTextColor: Color) {
         modifier = Modifier.fillMaxWidth().border(1.dp, if (isProfit) Emerald400.copy(alpha = 0.2f) else Slate800, RoundedCornerShape(24.dp))
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier.size(40.dp).background(Slate900.copy(alpha = 0.6f), RoundedCornerShape(8.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = accentTextColor, modifier = Modifier.size(20.dp))
-                }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("EFFECTIVE ANNUAL FEE", style = MaterialTheme.typography.labelSmall, color = Slate500, fontWeight = FontWeight.Bold)
+                Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = accentTextColor)
             }
-            
-            Spacer(Modifier.height(24.dp))
-            
+            Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     text = if (isProfit) "$${summary.profit.toInt()}" else "$${summary.effectiveAnnualFee.toInt()}",
@@ -550,24 +512,6 @@ fun EffectiveFeeSection(summary: CardSummary, accentTextColor: Color) {
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
             }
-            
-            Spacer(Modifier.height(16.dp))
-            
-            if (isProfit) {
-                Text(
-                    "Excellent management. You've officially 'beaten' the annual fee for 2026.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Slate500,
-                    lineHeight = 18.sp
-                )
-            } else {
-                Text(
-                    "Extract $${summary.effectiveAnnualFee.toInt()} more in value to reach break-even status.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Slate500,
-                    lineHeight = 18.sp
-                )
-            }
         }
     }
 }
@@ -575,44 +519,26 @@ fun EffectiveFeeSection(summary: CardSummary, accentTextColor: Color) {
 @Composable
 fun DetailRow(label: String, value: String, color: Color = TextWhite) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = Slate500, fontWeight = FontWeight.Medium)
+        Text(label, color = Slate500)
         Text(value, color = color, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
 fun DetailRowWithToggle(label: String, value: String, isClaimed: Boolean, onToggle: () -> Unit) {
-    val labelColor = if (isClaimed) TextWhite else Slate600
-    val valueColor = if (isClaimed) Emerald400 else Slate600
-    val circleColor = if (isClaimed) Emerald400 else Slate700
-
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onToggle() },
+        modifier = Modifier.fillMaxWidth().clickable { onToggle() },
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(16.dp)
-                    .border(1.dp, circleColor, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isClaimed) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = null,
-                        tint = Emerald400,
-                        modifier = Modifier.size(10.dp)
-                    )
-                }
+            Box(modifier = Modifier.size(16.dp).border(1.dp, if (isClaimed) Emerald400 else Slate700, CircleShape), contentAlignment = Alignment.Center) {
+                if (isClaimed) Icon(Icons.Default.Check, contentDescription = null, tint = Emerald400, modifier = Modifier.size(10.dp))
             }
             Spacer(Modifier.width(8.dp))
-            Text(label, color = labelColor, fontWeight = FontWeight.Medium)
+            Text(label, color = if (isClaimed) TextWhite else Slate600)
         }
-        Text(value, color = valueColor, fontWeight = FontWeight.Bold)
+        Text(value, color = if (isClaimed) Emerald400 else Slate600, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -626,121 +552,69 @@ fun BenefitCard(uiModel: BenefitUiModel, trackingYear: String, accentBgColor: Co
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
-                    Text(benefit.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TextWhite)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(benefit.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextWhite)
                     Text(benefit.description, style = MaterialTheme.typography.bodySmall, color = Slate500)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "$${uiModel.totalClaimedInPeriod.toInt()}",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = accentTextColor
-                        )
-                        Text(
-                            " / $${benefit.totalValue.toInt()}",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = Slate500
-                        )
-                    }
+                    Text(
+                        text = "$${uiModel.totalClaimedInPeriod.toInt()} / $${benefit.totalValue.toInt()}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = accentTextColor
+                    )
                     LinearProgressIndicator(
                         progress = { uiModel.progress },
-                        modifier = Modifier.width(100.dp).height(8.dp).padding(top = 8.dp),
+                        modifier = Modifier.width(80.dp).height(4.dp).padding(top = 4.dp),
                         color = accentBgColor,
-                        trackColor = Slate900.copy(alpha = 0.6f),
-                        strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+                        trackColor = Slate800
                     )
                 }
             }
-            
             Spacer(Modifier.height(24.dp))
-            
-            val year = trackingYear
-            
             when (benefit.type) {
                 BenefitType.MONTHLY -> {
-                    val configuration = LocalConfiguration.current
-                    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
                     val months = listOf("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
-
-                    if (isLandscape) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            months.forEachIndexed { index, name ->
-                                val periodId = "$year-${(index + 1).toString().padStart(2, '0')}"
-                                val isClaimed = uiModel.history.any { it.periodIdentifier == periodId }
-                                MonthChip(name, isClaimed, accentBgColor, modifier = Modifier.weight(1f)) { onToggle(periodId) }
+                            months.take(6).forEachIndexed { index, name ->
+                                val periodId = "$trackingYear-${(index + 1).toString().padStart(2, '0')}"
+                                MonthChip(name, uiModel.history.any { it.periodIdentifier == periodId }, accentBgColor, Modifier.weight(1f)) { onToggle(periodId) }
                             }
                         }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val firstRow = months.take(6)
-                            val secondRow = months.drop(6)
-                            
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                firstRow.forEachIndexed { index, name ->
-                                    val periodId = "$year-${(index + 1).toString().padStart(2, '0')}"
-                                    val isClaimed = uiModel.history.any { it.periodIdentifier == periodId }
-                                    MonthChip(name, isClaimed, accentBgColor, modifier = Modifier.weight(1f)) { onToggle(periodId) }
-                                }
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                secondRow.forEachIndexed { index, name ->
-                                    val periodId = "$year-${(index + 7).toString().padStart(2, '0')}"
-                                    val isClaimed = uiModel.history.any { it.periodIdentifier == periodId }
-                                    MonthChip(name, isClaimed, accentBgColor, modifier = Modifier.weight(1f)) { onToggle(periodId) }
-                                }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            months.drop(6).forEachIndexed { index, name ->
+                                val periodId = "$trackingYear-${(index + 7).toString().padStart(2, '0')}"
+                                MonthChip(name, uiModel.history.any { it.periodIdentifier == periodId }, accentBgColor, Modifier.weight(1f)) { onToggle(periodId) }
                             }
                         }
                     }
                 }
                 BenefitType.QUARTERLY -> {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val quarters = listOf("Q1", "Q2", "Q3", "Q4")
-                        quarters.forEachIndexed { index, name ->
-                            val periodId = "$year-Q${index + 1}"
-                            val isClaimed = uiModel.history.any { it.periodIdentifier == periodId }
-                            QuarterChip(name, isClaimed, accentBgColor, modifier = Modifier.weight(1f)) { onToggle(periodId) }
+                        listOf("Q1", "Q2", "Q3", "Q4").forEachIndexed { index, name ->
+                            val periodId = "$trackingYear-Q${index + 1}"
+                            QuarterChip(name, uiModel.history.any { it.periodIdentifier == periodId }, accentBgColor, Modifier.weight(1f)) { onToggle(periodId) }
                         }
                     }
                 }
                 BenefitType.SEMI_ANNUAL -> {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        val p1 = "$year-H1"
-                        val p2 = "$year-H2"
-                        HalfChip("HALF 1", uiModel.history.any { it.periodIdentifier == p1 }, accentBgColor, modifier = Modifier.weight(1f)) { onToggle(p1) }
-                        HalfChip("HALF 2", uiModel.history.any { it.periodIdentifier == p2 }, accentBgColor, modifier = Modifier.weight(1f)) { onToggle(p2) }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HalfChip("H1", uiModel.history.any { it.periodIdentifier == "$trackingYear-H1" }, accentBgColor, Modifier.weight(1f)) { onToggle("$trackingYear-H1") }
+                        HalfChip("H2", uiModel.history.any { it.periodIdentifier == "$trackingYear-H2" }, accentBgColor, Modifier.weight(1f)) { onToggle("$trackingYear-H2") }
                     }
                 }
                 BenefitType.ANNUAL -> {
-                    val periodId = "$year-Annual"
-                    val isClaimed = uiModel.isClaimedInCurrentPeriod
+                    val periodId = "$trackingYear-Annual"
                     Surface(
                         onClick = { onToggle(periodId) },
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        color = if (isClaimed) accentBgColor else Slate900.copy(alpha = 0.6f),
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        color = if (uiModel.isClaimedInCurrentPeriod) accentBgColor else Slate900.copy(alpha = 0.6f),
                         shape = RoundedCornerShape(12.dp),
-                        border = if (isClaimed) null else BorderStroke(1.dp, Slate800)
+                        border = if (uiModel.isClaimedInCurrentPeriod) null else BorderStroke(1.dp, Slate800)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("ANNUAL CREDIT", fontWeight = FontWeight.Bold, color = if (isClaimed) Color.White else Slate500)
-                            Spacer(Modifier.width(12.dp))
-                            Box(
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .background(if (isClaimed) Color.White.copy(alpha = 0.2f) else Color.Transparent, CircleShape)
-                                    .border(1.dp, if (isClaimed) Color.White else Slate700, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (isClaimed) {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                                }
-                            }
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("ANNUAL CREDIT", fontWeight = FontWeight.Bold, color = if (uiModel.isClaimedInCurrentPeriod) Color.White else Slate500)
                         }
                     }
                 }
@@ -750,31 +624,15 @@ fun BenefitCard(uiModel: BenefitUiModel, trackingYear: String, accentBgColor: Co
 }
 
 @Composable
-fun MonthChip(month: String, isClaimed: Boolean, accentBgColor: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun MonthChip(label: String, isClaimed: Boolean, accentBgColor: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
         color = if (isClaimed) accentBgColor else Slate900.copy(alpha = 0.6f),
-        shape = RoundedCornerShape(12.dp),
-        modifier = modifier.height(72.dp).clickable { onClick() },
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier.height(40.dp).clickable { onClick() },
         border = if (isClaimed) null else BorderStroke(1.dp, Slate800)
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(vertical = 8.dp)
-        ) {
-            Text(month, fontSize = 10.sp, color = if (isClaimed) TextWhite else Slate500, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(12.dp))
-            Box(
-                modifier = Modifier
-                    .size(18.dp)
-                    .background(if (isClaimed) Color.White.copy(alpha = 0.2f) else Color.Transparent, CircleShape)
-                    .border(1.dp, if (isClaimed) Color.White else Slate700, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isClaimed) {
-                    Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
-                }
-            }
+        Box(contentAlignment = Alignment.Center) {
+            Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (isClaimed) Color.White else Slate500)
         }
     }
 }
@@ -783,28 +641,12 @@ fun MonthChip(month: String, isClaimed: Boolean, accentBgColor: Color, modifier:
 fun QuarterChip(label: String, isClaimed: Boolean, accentBgColor: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
         color = if (isClaimed) accentBgColor else Slate900.copy(alpha = 0.6f),
-        shape = RoundedCornerShape(12.dp),
-        modifier = modifier.height(56.dp).clickable { onClick() },
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier.height(40.dp).clickable { onClick() },
         border = if (isClaimed) null else BorderStroke(1.dp, Slate800)
     ) {
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(label, fontSize = 14.sp, color = if (isClaimed) TextWhite else Slate500, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(8.dp))
-            Box(
-                modifier = Modifier
-                    .size(20.dp)
-                    .background(if (isClaimed) Color.White.copy(alpha = 0.2f) else Color.Transparent, CircleShape)
-                    .border(1.dp, if (isClaimed) Color.White else Slate700, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isClaimed) {
-                    Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                }
-            }
+        Box(contentAlignment = Alignment.Center) {
+            Text(label, fontWeight = FontWeight.Bold, color = if (isClaimed) Color.White else Slate500)
         }
     }
 }
@@ -813,28 +655,12 @@ fun QuarterChip(label: String, isClaimed: Boolean, accentBgColor: Color, modifie
 fun HalfChip(label: String, isClaimed: Boolean, accentBgColor: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
         color = if (isClaimed) accentBgColor else Slate900.copy(alpha = 0.6f),
-        shape = RoundedCornerShape(12.dp),
-        modifier = modifier.height(56.dp).clickable { onClick() },
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier.height(40.dp).clickable { onClick() },
         border = if (isClaimed) null else BorderStroke(1.dp, Slate800)
     ) {
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(label, fontSize = 14.sp, color = if (isClaimed) TextWhite else Slate500, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(12.dp))
-            Box(
-                modifier = Modifier
-                    .size(20.dp)
-                    .background(if (isClaimed) Color.White.copy(alpha = 0.2f) else Color.Transparent, CircleShape)
-                    .border(1.dp, if (isClaimed) Color.White else Slate700, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isClaimed) {
-                    Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                }
-            }
+        Box(contentAlignment = Alignment.Center) {
+            Text(label, fontWeight = FontWeight.Bold, color = if (isClaimed) Color.White else Slate500)
         }
     }
 }
@@ -845,25 +671,29 @@ fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit)
     var editValue by remember(trackingYear) { mutableStateOf(trackingYear) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val coroutineScope = rememberCoroutineScope()
+
+    BackHandler(enabled = isEditing) {
+        if (editValue.length == 4) onYearChanged(editValue)
+        isEditing = false
+        focusManager.clearFocus()
+    }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = "Tracking ",
-            style = MaterialTheme.typography.bodySmall,
-            color = Slate500
-        )
+        Text("Tracking ", style = MaterialTheme.typography.bodySmall, color = Slate500)
         
         if (isEditing) {
             BasicTextField(
                 value = editValue,
                 onValueChange = { 
-                    if (it.length <= 4 && it.all { char -> char.isDigit() }) {
+                    if (it.length <= 4 && it.all { c -> c.isDigit() }) {
                         editValue = it
                     }
                 },
                 textStyle = TextStyle(
-                    color = TextWhite,
-                    fontSize = 12.sp,
+                    color = TextWhite, 
+                    fontSize = 12.sp, 
                     fontWeight = FontWeight.Bold
                 ),
                 singleLine = true,
@@ -873,24 +703,29 @@ fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit)
                     .focusRequester(focusRequester)
                     .onFocusChanged { 
                         if (!it.isFocused && isEditing) {
-                            onYearChanged(editValue)
+                            if (editValue.length == 4) onYearChanged(editValue)
                             isEditing = false
                         }
                     },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Number,
+                    keyboardType = KeyboardType.Number, 
                     imeAction = ImeAction.Done
                 ),
-                keyboardActions = KeyboardActions(
-                    onDone = {
-                        onYearChanged(editValue)
-                        isEditing = false
-                        focusManager.clearFocus()
-                    }
-                )
+                keyboardActions = KeyboardActions(onDone = {
+                    if (editValue.length == 4) onYearChanged(editValue)
+                    isEditing = false
+                    focusManager.clearFocus()
+                })
             )
-            LaunchedEffect(Unit) {
-                focusRequester.requestFocus()
+            
+            // Re-request focus and show keyboard whenever isEditing becomes true
+            LaunchedEffect(isEditing) {
+                if (isEditing) {
+                    focusRequester.requestFocus()
+                    // Small delay to ensure the OS has time to process the focus request
+                    kotlinx.coroutines.delay(100)
+                    keyboardController?.show()
+                }
             }
         } else {
             Text(
@@ -899,16 +734,27 @@ fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit)
                 color = Slate500,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { isEditing = true })
+                    .pointerInput(trackingYear) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            val longPressJob = coroutineScope.launch {
+                                kotlinx.coroutines.delay(1000L)
+                                isEditing = true
+                            }
+                            
+                            // Wait for pointer release or cancel
+                            do {
+                                val event = awaitPointerEvent()
+                                val anyPressed = event.changes.any { it.pressed }
+                            } while (anyPressed)
+                            
+                            longPressJob.cancel()
+                        }
                     }
+                    .padding(vertical = 4.dp)
             )
         }
-        
-        Text(
-            text = " Refreshed Benefits",
-            style = MaterialTheme.typography.bodySmall,
-            color = Slate500
-        )
+
+        Text(" Refreshed Benefits", style = MaterialTheme.typography.bodySmall, color = Slate500)
     }
 }
