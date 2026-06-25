@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   CreditCard,
   TrendingUp,
@@ -197,6 +197,7 @@ export default function App() {
   const [trackingYear, setTrackingYear] = useState(currentSystemYear);
   const [isEditingYear, setIsEditingYear] = useState(false);
   const [editYearValue, setEditYearValue] = useState(currentSystemYear);
+  const longPressTimerRef = useRef(null);
   const [allClaims, setAllClaims] = useState({});
   const [corpCreditSettings, setCorpCreditSettings] = useState({
     platinum: { enabled: false },
@@ -567,12 +568,14 @@ export default function App() {
         <div className="flex items-center gap-4">
           <img src="./logo.png" alt="Amex Logo" className="w-16 h-16 object-contain rounded-2xl shadow-lg" />
           <div>
-            <h1 className="text-3xl font-bold tracking-tight mb-1">Amex Benefit Tracker</h1>
+            <h1 className="text-5xl font-bold tracking-tight mb-1">Amex Benefit Tracker</h1>
             <p className="text-slate-400 italic">
               Tracking{' '}
               {isEditingYear ? (
                 <input
                   type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={editYearValue}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -591,12 +594,26 @@ export default function App() {
                 />
               ) : (
                 <span
-                  onDoubleClick={() => {
-                    setEditYearValue(trackingYear);
-                    setIsEditingYear(true);
+                  onPointerDown={() => {
+                    longPressTimerRef.current = setTimeout(() => {
+                      setEditYearValue(trackingYear);
+                      setIsEditingYear(true);
+                    }, 1000);
+                  }}
+                  onPointerUp={() => {
+                    if (longPressTimerRef.current) {
+                      clearTimeout(longPressTimerRef.current);
+                      longPressTimerRef.current = null;
+                    }
+                  }}
+                  onPointerLeave={() => {
+                    if (longPressTimerRef.current) {
+                      clearTimeout(longPressTimerRef.current);
+                      longPressTimerRef.current = null;
+                    }
                   }}
                   className="font-bold cursor-pointer select-none"
-                  title="Double click to edit year"
+                  title="Long press (1s) to edit year"
                 >
                   {trackingYear}
                 </span>
@@ -621,7 +638,7 @@ export default function App() {
           <div className="bg-slate-900/40 backdrop-blur-sm border border-slate-800/50 p-8 rounded-3xl">
             <div className="flex items-center gap-3 mb-6">
               <span className={currentCard.accent}><CreditCard size={28} /></span>
-              <h3 className="text-xl font-bold">{currentCard.name}</h3>
+              <h3 className="text-[23px] font-bold">{currentCard.name}</h3>
             </div>
             <div className="space-y-4">
               <div className="flex justify-between items-center py-3 border-b border-slate-800/50">
@@ -668,7 +685,7 @@ export default function App() {
                   <p className="text-xs text-slate-500">{b.desc}</p>
                 </div>
                 <div className="flex items-center gap-4 bg-slate-950/50 px-4 py-2 rounded-xl border border-slate-800/50">
-                  <span className="text-xl font-bold text-white">${b.earned.toFixed(0)} <span className="text-slate-500 text-xs font-normal">/ ${b.total}</span></span>
+                  <span className="text-lg font-bold text-white">${b.earned.toFixed(0)} <span className="text-slate-500 text-xs font-normal">/ ${b.total}</span></span>
                   <div className="w-20 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                     <div className={`h-full ${currentCard.accentBg}`} style={{ width: `${(b.earned / b.total) * 100}%` }}></div>
                   </div>
