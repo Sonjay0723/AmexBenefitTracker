@@ -595,7 +595,7 @@ export default function App() {
                     setEditYearValue(trackingYear);
                     setIsEditingYear(true);
                   }}
-                  className="font-bold text-white hover:text-blue-400 transition-colors cursor-pointer select-none"
+                  className="font-bold cursor-pointer select-none"
                   title="Double click to edit year"
                 >
                   {trackingYear}
