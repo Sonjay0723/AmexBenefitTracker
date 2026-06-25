@@ -131,21 +131,21 @@ class UserAuthenticationTest {
         assertNotNull("Claims map in Firestore should not be null", claims)
 
         @Suppress("UNCHECKED_CAST")
-        val cardClaims = claims["test_platinum_card"] as? Map<String, Any>
+        val cardClaims = claims?.get("test_platinum_card") as? Map<String, Any>
         assertNotNull("test_platinum_card claims should exist in Firestore", cardClaims)
 
         @Suppress("UNCHECKED_CAST")
-        val yearClaims = cardClaims["2026"] as? Map<String, Any>
+        val yearClaims = cardClaims?.get("2026") as? Map<String, Any>
         assertNotNull("2026 claims should exist in Firestore", yearClaims)
 
         @Suppress("UNCHECKED_CAST")
-        val benefitClaims = yearClaims["test_uber_cash"] as? Map<String, Any>
+        val benefitClaims = yearClaims?.get("test_uber_cash") as? Map<String, Any>
         assertNotNull("test_uber_cash claims should exist in Firestore", benefitClaims)
 
         @Suppress("UNCHECKED_CAST")
-        val periodClaims = benefitClaims["06"] as? Map<String, Any>
+        val periodClaims = benefitClaims?.get("06") as? Map<String, Any>
         assertNotNull("06 claims should exist in Firestore", periodClaims)
 
-        assertEquals("Synced amount mismatch", 15.0, (periodClaims["a"] as? Number)?.toDouble())
+        assertEquals("Synced amount mismatch", 15.0, (periodClaims?.get("a") as? Number)?.toDouble())
     }
 }
