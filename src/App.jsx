@@ -202,6 +202,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [showResetDialog, setShowResetDialog] = useState(false);
+  const [showSignOutDialog, setShowSignOutDialog] = useState(false);
 
   // Load from Firestore on auth state change
   useEffect(() => {
@@ -407,9 +408,8 @@ export default function App() {
   };
 
   const handleSignOut = () => {
-    if (window.confirm("Are you sure you want to sign out?")) {
-      signOut(auth);
-    }
+    signOut(auth);
+    setShowSignOutDialog(false);
   };
 
   const currentCard = INITIAL_DATA[activeCard];
@@ -524,7 +524,7 @@ export default function App() {
         <div className="flex items-center gap-4">
           <button onClick={refreshData} className="p-2 text-slate-600 hover:text-blue-400 transition-colors" title="Refresh from Cloud"><RotateCcw size={20} /></button>
           <button onClick={() => setShowResetDialog(true)} className="p-2 text-slate-600 hover:text-blue-400 transition-colors" title="Reset Tracking"><History size={20} /></button>
-          <button onClick={handleSignOut} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Sign Out"><LogOut size={20} /></button>
+          <button onClick={() => setShowSignOutDialog(true)} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Sign Out"><LogOut size={20} /></button>
           <div className="flex bg-slate-900/50 backdrop-blur-md p-1 rounded-xl border border-slate-800">
             <button onClick={() => setActiveCard('platinum')} className={`px-8 py-2 rounded-lg font-medium transition-all ${activeCard === 'platinum' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>Platinum</button>
             <button onClick={() => setActiveCard('gold')} className={`px-8 py-2 rounded-lg font-medium transition-all ${activeCard === 'gold' ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>Gold</button>
@@ -613,6 +613,30 @@ export default function App() {
               </button>
               <button
                 onClick={handleReset}
+                className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-colors shadow-lg shadow-red-500/25"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showSignOutDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-white mb-2">Amex Benefit Tracker</h3>
+            <p className="text-slate-400 text-sm mb-6">
+              Are you sure you want to sign out?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowSignOutDialog(false)}
+                className="px-4 py-2 text-slate-500 hover:text-slate-300 font-bold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSignOut}
                 className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-colors shadow-lg shadow-red-500/25"
               >
                 OK
