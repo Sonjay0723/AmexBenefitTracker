@@ -27,17 +27,18 @@ class UserAuthenticationTest {
     private lateinit var repository: BenefitRepository
     private val auth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
-    private val testScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Before
     fun setUp() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
         repository = BenefitRepository(
             db.cardDao(),
             db.benefitDao(),
             db.usageHistoryDao(),
-            testScope
+            CoroutineScope(SupervisorJob() + Dispatchers.Main)
         )
         // Sign out any active user before running tests
         auth.signOut()
@@ -108,43 +109,47 @@ class UserAuthenticationTest {
             decemberValue = 35.0,
             displayOrder = 1
         )
-        db.benefitDao().insertBenefit(benefit)
+        val benefitId = db.benefitDao().insertBenefit(benefit)
+        val insertedBenefit = db.benefitDao().getBenefitById(benefitId)
+        assertNotNull("Benefit should be inserted", insertedBenefit)
 
         // 5. Toggle usage to trigger local database insert and asynchronous Firestore sync
         val periodIdentifier = "2026-06"
         val timestamp = System.currentTimeMillis()
-        repository.toggleUsage(benefit, periodIdentifier, timestamp)
+        
+        // Use a wrapper to ensure we wait for the launch in repository.toggleUsage
+        repository.toggleUsage(insertedBenefit!!, periodIdentifier, timestamp)
 
         // Give a short delay to allow background sync to complete
-        kotlinx.coroutines.delay(2000)
+        kotlinx.coroutines.delay(5000)
 
         // 6. Verify state is stored remotely in Firestore
         val documentSnapshot = firestore.collection("users").document(userId).get().await()
         assertTrue("Firestore user document should exist", documentSnapshot.exists())
 
         val remoteData = documentSnapshot.data
-        assertNotNull("Remote data should not be null", remoteData)
+        assertNotNull("Remote data should not be null. Document path: ${documentSnapshot.reference.path}. User ID: $userId", remoteData)
 
         // Verify claims map matches what was toggled
         @Suppress("UNCHECKED_CAST")
         val claims = remoteData?.get("claims") as? Map<String, Any>
-        assertNotNull("Claims map in Firestore should not be null", claims)
+        assertNotNull("Claims map in Firestore should not be null. Got data: $remoteData", claims)
 
         @Suppress("UNCHECKED_CAST")
         val cardClaims = claims?.get("test_platinum_card") as? Map<String, Any>
-        assertNotNull("test_platinum_card claims should exist in Firestore", cardClaims)
+        assertNotNull("test_platinum_card claims should exist in Firestore. Got claims keys: ${claims?.keys}", cardClaims)
 
         @Suppress("UNCHECKED_CAST")
         val yearClaims = cardClaims?.get("2026") as? Map<String, Any>
-        assertNotNull("2026 claims should exist in Firestore", yearClaims)
+        assertNotNull("2026 claims should exist in Firestore. Got year keys: ${cardClaims?.keys}", yearClaims)
 
         @Suppress("UNCHECKED_CAST")
         val benefitClaims = yearClaims?.get("test_uber_cash") as? Map<String, Any>
-        assertNotNull("test_uber_cash claims should exist in Firestore", benefitClaims)
+        assertNotNull("test_uber_cash claims should exist in Firestore. Got benefit keys: ${yearClaims?.keys}", benefitClaims)
 
         @Suppress("UNCHECKED_CAST")
         val periodClaims = benefitClaims?.get("06") as? Map<String, Any>
-        assertNotNull("06 claims should exist in Firestore", periodClaims)
+        assertNotNull("06 claims should exist in Firestore. Got period keys: ${benefitClaims?.keys}", periodClaims)
 
         assertEquals("Synced amount mismatch", 15.0, (periodClaims?.get("a") as? Number)?.toDouble())
     }
