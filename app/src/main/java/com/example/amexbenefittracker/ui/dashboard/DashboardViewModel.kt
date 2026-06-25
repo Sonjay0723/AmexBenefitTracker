@@ -17,8 +17,7 @@ class DashboardViewModel(private val repository: BenefitRepository) : ViewModel(
     private val _selectedCardId = MutableStateFlow<Long?>(null)
     val selectedCardId = _selectedCardId.asStateFlow()
 
-    private val _trackingYear = MutableStateFlow(Calendar.getInstance(TimeZone.getTimeZone("America/New_York")).get(Calendar.YEAR).toString())
-    val trackingYear = _trackingYear.asStateFlow()
+    val trackingYear = repository.trackingYear
 
     val cards = repository.getAllCards().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -29,31 +28,32 @@ class DashboardViewModel(private val repository: BenefitRepository) : ViewModel(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val benefits: StateFlow<List<BenefitUiModel>> = selectedCardId
-        .flatMapLatest { id ->
-            if (id == null) return@flatMapLatest flowOf(emptyList())
-            
-            val benefitsFlow = repository.getBenefitsForCard(id)
-            val usageFlow = repository.getUsageForCard(id)
-            
-            combine(benefitsFlow, usageFlow) { benefits, usages ->
-                benefits.map { benefit ->
-                    val period = getCurrentPeriod(benefit)
-                    val relevantUsages = usages.filter { it.benefitId == benefit.id }
-                    val currentPeriodUsage = relevantUsages.find { it.periodIdentifier == period }
-                    
-                    val totalClaimed = relevantUsages.sumOf { it.amountClaimed }
-                    
-                    BenefitUiModel(
-                        benefit = benefit,
-                        totalClaimedInPeriod = totalClaimed, // This should probably be total for the whole year vs totalValue
-                        isClaimedInCurrentPeriod = currentPeriodUsage != null,
-                        progress = (totalClaimed / benefit.totalValue).coerceIn(0.0, 1.0).toFloat(),
-                        history = relevantUsages
-                    )
-                }
+    val benefits: StateFlow<List<BenefitUiModel>> = combine(selectedCardId, trackingYear) { id, year ->
+        id to year
+    }.flatMapLatest { (id, year) ->
+        if (id == null) return@flatMapLatest flowOf(emptyList())
+        
+        val benefitsFlow = repository.getBenefitsForCard(id)
+        val usageFlow = repository.getUsageForCard(id)
+        
+        combine(benefitsFlow, usageFlow) { benefitsList, usages ->
+            benefitsList.map { benefit ->
+                val period = getCurrentPeriod(benefit)
+                val relevantUsages = usages.filter { it.benefitId == benefit.id }
+                val currentPeriodUsage = relevantUsages.find { it.periodIdentifier == period }
+                
+                val totalClaimed = relevantUsages.filter { it.periodIdentifier.startsWith(year) }.sumOf { it.amountClaimed }
+                
+                BenefitUiModel(
+                    benefit = benefit,
+                    totalClaimedInPeriod = totalClaimed,
+                    isClaimedInCurrentPeriod = currentPeriodUsage != null,
+                    progress = (totalClaimed / benefit.totalValue).coerceIn(0.0, 1.0).toFloat(),
+                    history = relevantUsages
+                )
             }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         viewModelScope.launch {
@@ -79,7 +79,7 @@ class DashboardViewModel(private val repository: BenefitRepository) : ViewModel(
     }
 
     fun setTrackingYear(year: String) {
-        _trackingYear.value = year
+        repository.setTrackingYear(year)
     }
 
     fun toggleBenefit(benefit: Benefit, periodIdentifier: String? = null) {
@@ -103,7 +103,7 @@ class DashboardViewModel(private val repository: BenefitRepository) : ViewModel(
 
     fun getCurrentPeriod(benefit: Benefit): String {
         val calendar = Calendar.getInstance(TimeZone.getTimeZone("America/New_York"))
-        val year = calendar.get(Calendar.YEAR)
+        val year = trackingYear.value
         return when (benefit.type) {
             BenefitType.MONTHLY -> {
                 val month = calendar.get(Calendar.MONTH) + 1

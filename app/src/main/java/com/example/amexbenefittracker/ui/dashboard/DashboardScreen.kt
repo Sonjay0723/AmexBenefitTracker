@@ -188,6 +188,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                             items(benefits) { benefitUi ->
                                 BenefitCard(
                                     uiModel = benefitUi,
+                                    trackingYear = trackingYear,
                                     accentBgColor = accentBgColor,
                                     accentTextColor = accentTextColor,
                                     onToggle = { period -> viewModel.toggleBenefit(benefitUi.benefit, period) }
@@ -218,6 +219,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                     items(benefits) { benefitUi ->
                         BenefitCard(
                             uiModel = benefitUi,
+                            trackingYear = trackingYear,
                             accentBgColor = accentBgColor,
                             accentTextColor = accentTextColor,
                             onToggle = { period -> viewModel.toggleBenefit(benefitUi.benefit, period) }
@@ -615,7 +617,7 @@ fun DetailRowWithToggle(label: String, value: String, isClaimed: Boolean, onTogg
 }
 
 @Composable
-fun BenefitCard(uiModel: BenefitUiModel, accentBgColor: Color, accentTextColor: Color, onToggle: (String) -> Unit) {
+fun BenefitCard(uiModel: BenefitUiModel, trackingYear: String, accentBgColor: Color, accentTextColor: Color, onToggle: (String) -> Unit) {
     val benefit = uiModel.benefit
     Surface(
         color = Slate900.copy(alpha = 0.4f),
@@ -655,7 +657,7 @@ fun BenefitCard(uiModel: BenefitUiModel, accentBgColor: Color, accentTextColor: 
             
             Spacer(Modifier.height(24.dp))
             
-            val year = Calendar.getInstance().get(Calendar.YEAR)
+            val year = trackingYear
             
             when (benefit.type) {
                 BenefitType.MONTHLY -> {
