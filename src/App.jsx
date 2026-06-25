@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   CreditCard,
   TrendingUp,
@@ -197,7 +197,6 @@ export default function App() {
   const [trackingYear, setTrackingYear] = useState(currentSystemYear);
   const [isEditingYear, setIsEditingYear] = useState(false);
   const [editYearValue, setEditYearValue] = useState(currentSystemYear);
-  const longPressTimerRef = useRef(null);
   const [allClaims, setAllClaims] = useState({});
   const [corpCreditSettings, setCorpCreditSettings] = useState({
     platinum: { enabled: false },
@@ -574,8 +573,6 @@ export default function App() {
               {isEditingYear ? (
                 <input
                   type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
                   value={editYearValue}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -594,26 +591,12 @@ export default function App() {
                 />
               ) : (
                 <span
-                  onPointerDown={() => {
-                    longPressTimerRef.current = setTimeout(() => {
-                      setEditYearValue(trackingYear);
-                      setIsEditingYear(true);
-                    }, 1000);
-                  }}
-                  onPointerUp={() => {
-                    if (longPressTimerRef.current) {
-                      clearTimeout(longPressTimerRef.current);
-                      longPressTimerRef.current = null;
-                    }
-                  }}
-                  onPointerLeave={() => {
-                    if (longPressTimerRef.current) {
-                      clearTimeout(longPressTimerRef.current);
-                      longPressTimerRef.current = null;
-                    }
+                  onClick={() => {
+                    setEditYearValue(trackingYear);
+                    setIsEditingYear(true);
                   }}
                   className="font-bold cursor-pointer select-none"
-                  title="Long press (1s) to edit year"
+                  title="Click to edit year"
                 >
                   {trackingYear}
                 </span>
