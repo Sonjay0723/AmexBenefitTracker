@@ -10,6 +10,7 @@ import {
   Plane,
   ShoppingBag,
   RotateCcw,
+  History,
   Edit2,
   HardDrive,
   LogOut,
@@ -20,7 +21,7 @@ import {
 } from 'lucide-react';
 import { auth, db, googleProvider, isConfigured } from './firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -67,20 +68,20 @@ const INITIAL_DATA = {
 };
 
 const BENEFIT_MAP = {
-  p_hotel: { card: 'platinum', path: ['hotel'], freq: 'semi' },
-  p_uber: { card: 'platinum', path: ['uber_cash'], freq: 'month' },
-  p_uber_one: { card: 'platinum', path: ['annual_credits', 'uber_one'], freq: 'annual' },
-  p_resy: { card: 'platinum', path: ['resy'], freq: 'quart' },
-  p_streaming: { card: 'platinum', path: ['entertainment'], freq: 'month' },
-  p_lulu: { card: 'platinum', path: ['lulu'], freq: 'quart' },
-  p_walmart: { card: 'platinum', path: ['annual_credits', 'walmart'], freq: 'annual' },
-  p_saks: { card: 'platinum', path: ['saks'], freq: 'semi' },
-  p_clear: { card: 'platinum', path: ['annual_credits', 'clear'], freq: 'annual' },
-  p_airline: { card: 'platinum', path: ['annual_credits', 'airline'], freq: 'annual' },
-  g_uber: { card: 'gold', path: ['uber_cash'], freq: 'month' },
-  g_dining: { card: 'gold', path: ['dining'], freq: 'month' },
-  g_dunkin: { card: 'gold', path: ['dunkin'], freq: 'month' },
-  g_resy: { card: 'gold', path: ['resy'], freq: 'semi' }
+  p_hotel: { card: 'platinum', path: 'hotel_credit', freq: 'semi' },
+  p_uber: { card: 'platinum', path: 'uber_cash', freq: 'month' },
+  p_uber_one: { card: 'platinum', path: 'uber_one', freq: 'annual' },
+  p_resy: { card: 'platinum', path: 'resy_credit', freq: 'quart' },
+  p_streaming: { card: 'platinum', path: 'digital_entertainment', freq: 'month' },
+  p_lulu: { card: 'platinum', path: 'lululemon_credit', freq: 'quart' },
+  p_walmart: { card: 'platinum', path: 'walmartplus', freq: 'annual' },
+  p_saks: { card: 'platinum', path: 'saks_fifth_avenue', freq: 'semi' },
+  p_clear: { card: 'platinum', path: 'clearplus_credit', freq: 'annual' },
+  p_airline: { card: 'platinum', path: 'airline_fee_credit', freq: 'annual' },
+  g_uber: { card: 'gold', path: 'uber_cash', freq: 'month' },
+  g_dining: { card: 'gold', path: 'dining_credit', freq: 'month' },
+  g_dunkin: { card: 'gold', path: 'dunkin_credit', freq: 'month' },
+  g_resy: { card: 'gold', path: 'resy_credit', freq: 'semi' }
 };
 
 const getBenefitAmount = (benefitId, idx) => {
@@ -99,8 +100,8 @@ const getBenefitAmount = (benefitId, idx) => {
   return 0;
 };
 
-const getPeriodInfo = (freq, path) => {
-  if (freq === 'annual') return { keys: [path[1]], indices: [0] };
+const getPeriodInfo = (freq) => {
+  if (freq === 'annual') return { keys: ['Annual'], indices: [0] };
   if (freq === 'quart') return { keys: ['Q1', 'Q2', 'Q3', 'Q4'], indices: [0, 3, 6, 9] };
   if (freq === 'semi') return { keys: ['H1', 'H2'], indices: [0, 6] };
   return { keys: Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')), indices: Array.from({ length: 12 }, (_, i) => i) };
@@ -114,18 +115,29 @@ const deserializeClaims = (claims, year) => {
   });
   if (!claims) return { usage, timestamps };
 
-  Object.entries(BENEFIT_MAP).forEach(([benefitId, { card, path, freq }]) => {
-    const cardClaims = claims[card]?.[year];
-    if (!cardClaims) return;
-    const parentKey = path[0];
-    const categoryClaims = cardClaims[parentKey];
-    if (!categoryClaims) return;
+  const cardMapping = {
+    platinum: 'the_platinum_card',
+    gold: 'american_express_gold_card'
+  };
 
-    const { keys, indices } = getPeriodInfo(freq, path);
+  Object.entries(BENEFIT_MAP).forEach(([benefitId, { card, path, freq }]) => {
+    const { keys, indices } = getPeriodInfo(freq);
+    
     keys.forEach((key, kIdx) => {
-      const claim = categoryClaims[key];
+      const monthIdx = indices[kIdx];
+      let claim = null;
+
+      if (path === 'uber_cash') {
+        // Uber Cash is linked, look in both cards
+        const platClaims = claims['the_platinum_card']?.[year]?.['uber_cash']?.[key];
+        const goldClaims = claims['american_express_gold_card']?.[year]?.['uber_cash']?.[key];
+        claim = platClaims || goldClaims;
+      } else {
+        const firestoreCardKey = cardMapping[card];
+        claim = claims[firestoreCardKey]?.[year]?.[path]?.[key];
+      }
+
       if (claim) {
-        const monthIdx = indices[kIdx];
         usage[benefitId][monthIdx] = true;
         timestamps[benefitId][monthIdx] = claim.d || Date.now();
       }
@@ -136,20 +148,38 @@ const deserializeClaims = (claims, year) => {
 
 const serializeClaims = (usage, timestamps, year) => {
   const claims = {};
+
+  const cardMapping = {
+    platinum: 'the_platinum_card',
+    gold: 'american_express_gold_card'
+  };
+
+  const processedUberCashPeriods = new Set();
+
   Object.entries(BENEFIT_MAP).forEach(([benefitId, { card, path, freq }]) => {
     const usedArr = usage[benefitId] || Array(12).fill(false);
     const tsArr = timestamps[benefitId] || Array(12).fill(null);
-    const { keys, indices } = getPeriodInfo(freq, path);
+    const { keys, indices } = getPeriodInfo(freq);
 
     indices.forEach((monthIdx, kIdx) => {
       if (usedArr[monthIdx]) {
-        if (!claims[card]) claims[card] = {};
-        if (!claims[card][year]) claims[card][year] = {};
-        const cardClaims = claims[card][year];
-        const parentKey = path[0];
-        if (!cardClaims[parentKey]) cardClaims[parentKey] = {};
+        const periodKey = keys[kIdx];
+        const periodIdentifier = `${year}-${periodKey}`;
+
+        if (path === 'uber_cash') {
+          if (processedUberCashPeriods.has(periodIdentifier)) {
+            return;
+          }
+          processedUberCashPeriods.add(periodIdentifier);
+        }
+
+        const firestoreCardKey = cardMapping[card];
+        if (!claims[firestoreCardKey]) claims[firestoreCardKey] = {};
+        if (!claims[firestoreCardKey][year]) claims[firestoreCardKey][year] = {};
+        const cardClaims = claims[firestoreCardKey][year];
+        if (!cardClaims[path]) cardClaims[path] = {};
         
-        cardClaims[parentKey][keys[kIdx]] = {
+        cardClaims[path][periodKey] = {
           a: getBenefitAmount(benefitId, monthIdx),
           d: tsArr[monthIdx] || Date.now()
         };
@@ -171,6 +201,7 @@ export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [user, setUser] = useState(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [showResetDialog, setShowResetDialog] = useState(false);
 
   // Load from Firestore on auth state change
   useEffect(() => {
@@ -213,6 +244,13 @@ export default function App() {
             }
             setUsage(loadedUsage);
             setTimestamps(loadedTimestamps);
+
+            // Restore Corporate Credit Status
+            const nextCorp = {
+              platinum: { enabled: parsed["corp_credit_The Platinum Card®"] || false },
+              gold: { enabled: parsed["corp_credit_American Express® Gold Card"] || false }
+            };
+            setCorpCreditSettings(nextCorp);
           } else {
             const initialUsage = {};
             const initialTimestamps = {};
@@ -274,7 +312,8 @@ export default function App() {
     if (user) {
       setDoc(doc(db, 'users', user.uid), {
         claims: serializeClaims(nextUsage, nextTimestamps, trackingYear),
-        corpCreditSettings
+        "corp_credit_The Platinum Card®": corpCreditSettings.platinum.enabled,
+        "corp_credit_American Express® Gold Card": corpCreditSettings.gold.enabled
       }, { merge: true }).catch((err) => {
         console.error("Error saving user data to Firestore:", err);
       });
@@ -291,7 +330,8 @@ export default function App() {
     if (user) {
       setDoc(doc(db, 'users', user.uid), {
         claims: serializeClaims(usage, timestamps, trackingYear),
-        corpCreditSettings: nextSettings
+        "corp_credit_The Platinum Card®": nextSettings.platinum.enabled,
+        "corp_credit_American Express® Gold Card": nextSettings.gold.enabled
       }, { merge: true }).catch((err) => {
         console.error("Error saving user data to Firestore:", err);
       });
@@ -324,10 +364,45 @@ export default function App() {
         }
         setUsage(loadedUsage);
         setTimestamps(loadedTimestamps);
-        if (parsed.corpCreditSettings) setCorpCreditSettings(parsed.corpCreditSettings);
+
+        // Restore Corporate Credit Status
+        const nextCorp = {
+          platinum: { enabled: parsed["corp_credit_The Platinum Card®"] || false },
+          gold: { enabled: parsed["corp_credit_American Express® Gold Card"] || false }
+        };
+        setCorpCreditSettings(nextCorp);
       }
     } catch (err) {
       console.error('Failed to refresh data:', err);
+    }
+  };
+
+  const handleReset = async () => {
+    setShowResetDialog(false);
+    
+    // Reset local state
+    const initialUsage = {};
+    const initialTimestamps = {};
+    Object.keys(INITIAL_DATA).forEach(cardKey => {
+      INITIAL_DATA[cardKey].benefits.forEach(b => {
+        initialUsage[b.id] = Array(12).fill(false);
+        initialTimestamps[b.id] = Array(12).fill(null);
+      });
+    });
+    setUsage(initialUsage);
+    setTimestamps(initialTimestamps);
+    setCorpCreditSettings({
+      platinum: { enabled: false },
+      gold: { enabled: false }
+    });
+
+    // Reset Firestore data
+    if (user) {
+      try {
+        await deleteDoc(doc(db, 'users', user.uid));
+      } catch (err) {
+        console.error("Error resetting data in Firestore:", err);
+      }
     }
   };
 
@@ -448,6 +523,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4">
           <button onClick={refreshData} className="p-2 text-slate-600 hover:text-blue-400 transition-colors" title="Refresh from Cloud"><RotateCcw size={20} /></button>
+          <button onClick={() => setShowResetDialog(true)} className="p-2 text-slate-600 hover:text-blue-400 transition-colors" title="Reset Tracking"><History size={20} /></button>
           <button onClick={handleSignOut} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Sign Out"><LogOut size={20} /></button>
           <div className="flex bg-slate-900/50 backdrop-blur-md p-1 rounded-xl border border-slate-800">
             <button onClick={() => setActiveCard('platinum')} className={`px-8 py-2 rounded-lg font-medium transition-all ${activeCard === 'platinum' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>Platinum</button>
@@ -521,6 +597,30 @@ export default function App() {
           ))}
         </div>
       </div>
+      {showResetDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-white mb-2">Amex Benefit Tracker</h3>
+            <p className="text-slate-400 text-sm mb-6">
+              Are you sure you want to reset your tracking progress?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowResetDialog(false)}
+                className="px-4 py-2 text-slate-500 hover:text-slate-300 font-bold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReset}
+                className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-colors shadow-lg shadow-red-500/25"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
