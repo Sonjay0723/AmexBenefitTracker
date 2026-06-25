@@ -721,9 +721,9 @@ fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit)
             // Re-request focus and show keyboard whenever isEditing becomes true
             LaunchedEffect(isEditing) {
                 if (isEditing) {
+                    // Wait for layout/attachment pass to complete
+                    kotlinx.coroutines.delay(150)
                     focusRequester.requestFocus()
-                    // Small delay to ensure the OS has time to process the focus request
-                    kotlinx.coroutines.delay(100)
                     keyboardController?.show()
                 }
             }
@@ -737,9 +737,10 @@ fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit)
                     .pointerInput(trackingYear) {
                         awaitEachGesture {
                             awaitFirstDown(requireUnconsumed = false)
+                            var isLongPress = false
                             val longPressJob = coroutineScope.launch {
                                 kotlinx.coroutines.delay(1000L)
-                                isEditing = true
+                                isLongPress = true
                             }
                             
                             // Wait for pointer release or cancel
@@ -749,6 +750,9 @@ fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit)
                             } while (anyPressed)
                             
                             longPressJob.cancel()
+                            if (isLongPress) {
+                                isEditing = true
+                            }
                         }
                     }
                     .padding(vertical = 4.dp)
