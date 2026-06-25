@@ -178,7 +178,7 @@ class BenefitRepository(
                     val legacyHistory = data["history"] as? List<Map<String, Any>>
                     legacyHistory?.let { processLegacyHistory(it, cards) }
                 }
-                return cloudYear
+                return estYear
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -280,17 +280,6 @@ class BenefitRepository(
                     }
                 }
             }
-        }
-    }
-
-    suspend fun updateTrackingYear(year: String) {
-        setTrackingYear(year)
-        val userId = auth.currentUser?.uid ?: return
-        try {
-            firestore.collection("users").document(userId).update("tracking_year", year).await()
-        } catch (e: Exception) {
-            // If document doesn't exist, we might need a set
-            syncLocalToFirestore()
         }
     }
 

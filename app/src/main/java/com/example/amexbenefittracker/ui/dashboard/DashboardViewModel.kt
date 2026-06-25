@@ -81,12 +81,6 @@ class DashboardViewModel(private val repository: BenefitRepository) : ViewModel(
         }
     }
 
-    fun setTrackingYear(year: String) {
-        viewModelScope.launch {
-            repository.updateTrackingYear(year)
-        }
-    }
-
     fun toggleBenefit(benefit: Benefit, periodIdentifier: String? = null) {
         viewModelScope.launch {
             val period = periodIdentifier ?: getCurrentPeriod(benefit)

@@ -113,7 +113,6 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                 trackingYear = trackingYear,
                 isLandscape = isLandscape,
                 onCardSelected = { viewModel.selectCard(it) },
-                onYearChanged = { viewModel.setTrackingYear(it) },
                 onResetClick = { showResetDialog = true },
                 onSignOutClick = { showSignOutDialog = true }
             )
@@ -247,7 +246,6 @@ fun DashboardTopBar(
     trackingYear: String,
     isLandscape: Boolean,
     onCardSelected: (Long) -> Unit,
-    onYearChanged: (String) -> Unit,
     onResetClick: () -> Unit,
     onSignOutClick: () -> Unit
 ) {
@@ -282,7 +280,7 @@ fun DashboardTopBar(
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
-                    EditableYearSubheader(trackingYear, onYearChanged)
+                    EditableYearSubheader(trackingYear)
                 }
             }
 
@@ -355,7 +353,7 @@ fun DashboardTopBar(
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
-                        EditableYearSubheader(trackingYear, onYearChanged)
+                        EditableYearSubheader(trackingYear)
                     }
                 }
                 
@@ -664,7 +662,7 @@ fun HalfChip(label: String, isClaimed: Boolean, accentBgColor: Color, modifier: 
 }
 
 @Composable
-fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit) {
+fun EditableYearSubheader(trackingYear: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Tracking ", style = MaterialTheme.typography.bodySmall, color = Slate500)
         Text(
