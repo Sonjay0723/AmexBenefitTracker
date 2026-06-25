@@ -195,8 +195,6 @@ export default function App() {
   const [timestamps, setTimestamps] = useState({});
   const currentSystemYear = new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: 'America/New_York' }).format(new Date());
   const [trackingYear, setTrackingYear] = useState(currentSystemYear);
-  const [isEditingYear, setIsEditingYear] = useState(false);
-  const [editYearValue, setEditYearValue] = useState(currentSystemYear);
   const [allClaims, setAllClaims] = useState({});
   const [corpCreditSettings, setCorpCreditSettings] = useState({
     platinum: { enabled: false },
@@ -223,9 +221,8 @@ export default function App() {
           
           if (docSnap.exists()) {
             const parsed = docSnap.data();
-            const yearToUse = parsed.tracking_year || currentSystemYear;
+            const yearToUse = currentSystemYear;
             setTrackingYear(yearToUse);
-            setEditYearValue(yearToUse);
             setAllClaims(parsed.claims || {});
 
             let loadedUsage = {};
@@ -302,27 +299,7 @@ export default function App() {
     });
   };
 
-  const handleYearSave = () => {
-    setIsEditingYear(false);
-    if (!editYearValue || !/^\d+$/.test(editYearValue)) {
-      setEditYearValue(trackingYear);
-      return;
-    }
-    const newYear = editYearValue;
-    setTrackingYear(newYear);
-    
-    const deserialized = deserializeClaims(allClaims, newYear);
-    setUsage(deserialized.usage);
-    setTimestamps(deserialized.timestamps);
 
-    if (user) {
-      setDoc(doc(db, 'users', user.uid), {
-        tracking_year: newYear
-      }, { merge: true }).catch((err) => {
-        console.error("Error saving tracking year to Firestore:", err);
-      });
-    }
-  };
 
   const toggleMonth = (benefitId, monthIndex) => {
     const currentArr = usage[benefitId] || Array(12).fill(false);
@@ -393,9 +370,8 @@ export default function App() {
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         const parsed = docSnap.data();
-        const yearToUse = parsed.tracking_year || currentSystemYear;
+        const yearToUse = currentSystemYear;
         setTrackingYear(yearToUse);
-        setEditYearValue(yearToUse);
         setAllClaims(parsed.claims || {});
 
         let loadedUsage = {};
@@ -570,37 +546,9 @@ export default function App() {
             <h1 className="text-5xl font-bold tracking-tight mb-1">Amex Benefit Tracker</h1>
             <p className="text-slate-400 italic">
               Tracking{' '}
-              {isEditingYear ? (
-                <input
-                  type="text"
-                  value={editYearValue}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (/^\d*$/.test(val)) {
-                      setEditYearValue(val);
-                    }
-                  }}
-                  onBlur={handleYearSave}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleYearSave();
-                    }
-                  }}
-                  className="w-16 bg-slate-900 border border-slate-700 rounded px-1 text-center text-white font-bold inline focus:outline-none focus:border-blue-500"
-                  autoFocus
-                />
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditYearValue(trackingYear);
-                    setIsEditingYear(true);
-                  }}
-                  className="font-bold cursor-pointer select-none"
-                  title="Click to edit year"
-                >
-                  {trackingYear}
-                </span>
-              )}{' '}
+              <span className="font-bold text-white select-none">
+                {trackingYear}
+              </span>{' '}
               Refreshed Benefits
             </p>
           </div>
