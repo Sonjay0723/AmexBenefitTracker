@@ -26,7 +26,7 @@ class BenefitRepository(
     private val firestore = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
 
-    private val _trackingYear = MutableStateFlow(Calendar.getInstance().get(Calendar.YEAR).toString())
+    private val _trackingYear = MutableStateFlow(Calendar.getInstance(TimeZone.getTimeZone("America/New_York")).get(Calendar.YEAR).toString())
     val trackingYear: StateFlow<String> = _trackingYear.asStateFlow()
 
     fun setTrackingYear(year: String) {
@@ -153,9 +153,9 @@ class BenefitRepository(
             if (snapshot.exists()) {
                 val data = snapshot.data ?: return null
                 
-                // Restore tracking year
-                val cloudYear = data["tracking_year"] as? String
-                cloudYear?.let { setTrackingYear(it) }
+                // Automatically set tracking year based on EST
+                val estYear = Calendar.getInstance(TimeZone.getTimeZone("America/New_York")).get(Calendar.YEAR).toString()
+                setTrackingYear(estYear)
                 
                 // Clear local tracking before restoring
                 usageHistoryDao.deleteAllUsage()

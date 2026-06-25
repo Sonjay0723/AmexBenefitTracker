@@ -665,77 +665,15 @@ fun HalfChip(label: String, isClaimed: Boolean, accentBgColor: Color, modifier: 
 
 @Composable
 fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit) {
-    var isEditing by remember { mutableStateOf(false) }
-    var editValue by remember(trackingYear) { mutableStateOf(trackingYear) }
-    val focusRequester = remember { FocusRequester() }
-    val focusManager = LocalFocusManager.current
-    val keyboardController = LocalSoftwareKeyboardController.current
-
-    BackHandler(enabled = isEditing) {
-        if (editValue.length == 4) onYearChanged(editValue)
-        isEditing = false
-        focusManager.clearFocus()
-    }
-
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Tracking ", style = MaterialTheme.typography.bodySmall, color = Slate500)
-        
-        if (isEditing) {
-            BasicTextField(
-                value = editValue,
-                onValueChange = { 
-                    if (it.length <= 4 && it.all { c -> c.isDigit() }) {
-                        editValue = it
-                    }
-                },
-                textStyle = TextStyle(
-                    color = TextWhite, 
-                    fontSize = 12.sp, 
-                    fontWeight = FontWeight.Bold
-                ),
-                singleLine = true,
-                cursorBrush = SolidColor(TextWhite),
-                modifier = Modifier
-                    .width(IntrinsicSize.Min)
-                    .focusRequester(focusRequester)
-                    .onFocusChanged { 
-                        if (!it.isFocused && isEditing) {
-                            if (editValue.length == 4) onYearChanged(editValue)
-                            isEditing = false
-                        }
-                    },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Text, 
-                    imeAction = ImeAction.Done
-                ),
-                keyboardActions = KeyboardActions(onDone = {
-                    if (editValue.length == 4) onYearChanged(editValue)
-                    isEditing = false
-                    focusManager.clearFocus()
-                })
-            )
-            
-            // Re-request focus and show keyboard whenever isEditing becomes true
-            LaunchedEffect(isEditing) {
-                if (isEditing) {
-                    // Wait for layout/attachment pass to complete
-                    kotlinx.coroutines.delay(150)
-                    focusRequester.requestFocus()
-                    keyboardController?.show()
-                }
-            }
-        } else {
-            Text(
-                text = trackingYear,
-                style = MaterialTheme.typography.bodySmall,
-                color = Slate500,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .clickable { isEditing = true }
-                    .padding(vertical = 4.dp)
-            )
-        }
-
+        Text(
+            text = trackingYear,
+            style = MaterialTheme.typography.bodySmall,
+            color = Slate500,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(vertical = 4.dp)
+        )
         Text(" Refreshed Benefits", style = MaterialTheme.typography.bodySmall, color = Slate500)
     }
 }
