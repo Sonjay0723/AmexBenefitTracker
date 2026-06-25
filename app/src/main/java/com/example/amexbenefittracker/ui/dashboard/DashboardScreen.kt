@@ -9,8 +9,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -672,7 +670,6 @@ fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit)
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    val coroutineScope = rememberCoroutineScope()
 
     BackHandler(enabled = isEditing) {
         if (editValue.length == 4) onYearChanged(editValue)
@@ -708,7 +705,7 @@ fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit)
                         }
                     },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Number, 
+                    keyboardType = KeyboardType.Text, 
                     imeAction = ImeAction.Done
                 ),
                 keyboardActions = KeyboardActions(onDone = {
@@ -734,27 +731,7 @@ fun EditableYearSubheader(trackingYear: String, onYearChanged: (String) -> Unit)
                 color = Slate500,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .pointerInput(trackingYear) {
-                        awaitEachGesture {
-                            awaitFirstDown(requireUnconsumed = false)
-                            var isLongPress = false
-                            val longPressJob = coroutineScope.launch {
-                                kotlinx.coroutines.delay(1000L)
-                                isLongPress = true
-                            }
-                            
-                            // Wait for pointer release or cancel
-                            do {
-                                val event = awaitPointerEvent()
-                                val anyPressed = event.changes.any { it.pressed }
-                            } while (anyPressed)
-                            
-                            longPressJob.cancel()
-                            if (isLongPress) {
-                                isEditing = true
-                            }
-                        }
-                    }
+                    .clickable { isEditing = true }
                     .padding(vertical = 4.dp)
             )
         }
