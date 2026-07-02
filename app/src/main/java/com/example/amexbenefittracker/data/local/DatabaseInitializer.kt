@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.first
 
 class DatabaseInitializer(private val repository: BenefitRepository) {
     suspend fun initialize() {
+        repository.deleteBenefitByName("Saks Fifth Avenue")
         val cards = repository.getAllCards().first()
         if (cards.isEmpty()) {
             val platinumId = repository.insertCard(
@@ -86,20 +87,11 @@ class DatabaseInitializer(private val repository: BenefitRepository) {
                 ),
                 Benefit(
                     cardId = platinumId,
-                    name = "Saks Fifth Avenue",
-                    description = "$50 per half-year",
-                    totalValue = 100.0,
-                    type = BenefitType.SEMI_ANNUAL,
-                    semiAnnualValue = 50.0,
-                    displayOrder = 7
-                ),
-                Benefit(
-                    cardId = platinumId,
                     name = "CLEAR+ Credit",
                     description = "Full membership coverage",
                     totalValue = 209.0,
                     type = BenefitType.ANNUAL,
-                    displayOrder = 8
+                    displayOrder = 7
                 ),
                 Benefit(
                     cardId = platinumId,
@@ -107,7 +99,7 @@ class DatabaseInitializer(private val repository: BenefitRepository) {
                     description = "Incidental fees only",
                     totalValue = 200.0,
                     type = BenefitType.ANNUAL,
-                    displayOrder = 9
+                    displayOrder = 8
                 )
             )
             platinumBenefits.forEach { repository.insertBenefit(it) }

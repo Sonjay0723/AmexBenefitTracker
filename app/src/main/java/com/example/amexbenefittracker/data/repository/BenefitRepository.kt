@@ -352,4 +352,9 @@ class BenefitRepository(
 
     suspend fun insertCard(card: Card): Long = cardDao.insertCard(card)
     suspend fun insertBenefit(benefit: Benefit): Long = benefitDao.insertBenefit(benefit)
+
+    suspend fun deleteBenefitByName(name: String) {
+        usageHistoryDao.deleteUsageForBenefitByName(name)
+        benefitDao.deleteBenefitByName(name)
+    }
 }

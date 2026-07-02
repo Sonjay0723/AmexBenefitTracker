@@ -29,4 +29,7 @@ interface UsageHistoryDao {
 
     @Query("DELETE FROM usage_history")
     suspend fun deleteAllUsage()
+
+    @Query("DELETE FROM usage_history WHERE benefitId IN (SELECT id FROM benefits WHERE name = :benefitName)")
+    suspend fun deleteUsageForBenefitByName(benefitName: String)
 }

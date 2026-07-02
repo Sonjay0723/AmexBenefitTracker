@@ -20,4 +20,7 @@ interface BenefitDao {
 
     @Query("SELECT * FROM benefits WHERE name = :name")
     suspend fun getBenefitsByName(name: String): List<Benefit>
+
+    @Query("DELETE FROM benefits WHERE name = :name")
+    suspend fun deleteBenefitByName(name: String)
 }

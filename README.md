@@ -8,7 +8,7 @@ A modern, high-performance Android application built with Jetpack Compose design
 *   **Intelligent Tracking**:
     *   **Monthly Credits**: Tracking for Uber Cash, Dining Credit, Digital Entertainment, and Dunkin'.
     *   **Quarterly Credits**: Specialized tracking for Resy and lululemon credits.
-    *   **Semi-Annual & Annual**: Tracking for Hotel, Saks Fifth Avenue, CLEAR+, and Airline Fee credits.
+    *   **Semi-Annual & Annual**: Tracking for Hotel, CLEAR+, and Airline Fee credits.
 *   **Linked Uber Cash**: Synchronized tracking between cards—checking Uber Cash for one card automatically updates the other for the same month.
 *   **Interactive Card Details**:
     *   Toggle **Corporate Credit** ($150 for Platinum, $100 for Gold) to see real-time impact on your financial summary.
