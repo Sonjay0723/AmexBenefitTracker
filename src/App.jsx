@@ -46,7 +46,6 @@ const INITIAL_DATA = {
       { id: 'p_streaming', name: 'Digital Entertainment', total: 300, freq: 'month', desc: '$25 per month' },
       { id: 'p_lulu', name: 'lululemon Credit', total: 300, freq: 'quart', desc: '$75 per quarter' },
       { id: 'p_walmart', name: 'Walmart+', total: 98, freq: 'annual', desc: 'Annual membership credit' },
-      { id: 'p_saks', name: 'Saks Fifth Avenue', total: 100, freq: 'semi', desc: '$50 per half-year' },
       { id: 'p_clear', name: 'CLEAR+ Credit', total: 209, freq: 'annual', desc: 'Full membership coverage' },
       { id: 'p_airline', name: 'Airline Fee Credit', total: 200, freq: 'annual', desc: 'Incidental fees only' }
     ]
@@ -75,7 +74,6 @@ const BENEFIT_MAP = {
   p_streaming: { card: 'platinum', path: 'digital_entertainment', freq: 'month' },
   p_lulu: { card: 'platinum', path: 'lululemon_credit', freq: 'quart' },
   p_walmart: { card: 'platinum', path: 'walmartplus', freq: 'annual' },
-  p_saks: { card: 'platinum', path: 'saks_fifth_avenue', freq: 'semi' },
   p_clear: { card: 'platinum', path: 'clearplus_credit', freq: 'annual' },
   p_airline: { card: 'platinum', path: 'airline_fee_credit', freq: 'annual' },
   g_uber: { card: 'gold', path: 'uber_cash', freq: 'month' },

@@ -11,7 +11,7 @@ A premium, interactive dashboard designed to help American Express Platinum and 
 - **Smart Tracking**: 
   - Monthly credits (Uber, Dining, Dunkin, etc.)
   - Quarterly credits (Resy, lululemon)
-  - Semi-annual credits (Saks, Hotel)
+  - Semi-annual credits (Hotel)
   - Annual credits (CLEAR+, Airline Fee, Walmart+)
 - **Corporate Credit Integration**: Toggle corporate card credits to refine your fee calculation.
 - **Privacy First**: All data is stored locally in your browser's `localStorage`. No data ever leaves your device.
