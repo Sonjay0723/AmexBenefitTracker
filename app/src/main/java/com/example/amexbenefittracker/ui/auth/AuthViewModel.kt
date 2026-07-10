@@ -41,10 +41,14 @@ class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
                             _isLoading.value = false
                             if (dbTask.isSuccessful) {
                                 if (!dbTask.result!!.exists()) {
-                                    authRepository.signOut()
-                                    _errorMessage.value = "User account not found in database"
+                                    // Auto-create missing user profile if auth is successful
+                                    val userMap = hashMapOf(
+                                        "email" to email,
+                                        "createdAt" to System.currentTimeMillis()
+                                    )
+                                    FirebaseFirestore.getInstance().collection("users").document(uid).set(userMap)
                                 }
-                                // If exists, AuthRepository's StateFlow will update the UI
+                                // If exists or created, AuthRepository's StateFlow will update the UI
                             } else {
                                 authRepository.signOut()
                                 _errorMessage.value = "Database connection failed: ${dbTask.exception?.message}"

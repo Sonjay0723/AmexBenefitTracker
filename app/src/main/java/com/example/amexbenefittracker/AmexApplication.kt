@@ -11,6 +11,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import com.example.amexbenefittracker.worker.UnusedCreditWorker
+import java.util.concurrent.TimeUnit
+
 class AmexApplication : Application() {
     val database by lazy {
         Room.databaseBuilder(
@@ -38,5 +44,13 @@ class AmexApplication : Application() {
         applicationScope.launch {
             DatabaseInitializer(repository).initialize()
         }
+
+        // Schedule periodic task to check for unused benefits on the 20th of the month
+        val workRequest = PeriodicWorkRequestBuilder<UnusedCreditWorker>(1, TimeUnit.DAYS).build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "UnusedCreditWorker",
+            ExistingPeriodicWorkPolicy.KEEP,
+            workRequest
+        )
     }
 }

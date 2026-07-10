@@ -38,7 +38,7 @@ class UserAuthenticationTest {
             db.cardDao(),
             db.benefitDao(),
             db.usageHistoryDao(),
-            CoroutineScope(SupervisorJob() + Dispatchers.Main)
+            CoroutineScope(SupervisorJob() + Dispatchers.IO) // Use IO for background sync in tests
         )
         // Sign out any active user before running tests
         auth.signOut()
@@ -117,39 +117,44 @@ class UserAuthenticationTest {
         val periodIdentifier = "2026-06"
         val timestamp = System.currentTimeMillis()
         
-        // Use a wrapper to ensure we wait for the launch in repository.toggleUsage
+        // This launches the sync in background
         repository.toggleUsage(insertedBenefit!!, periodIdentifier, timestamp)
 
-        // Give a short delay to allow background sync to complete
-        kotlinx.coroutines.delay(5000)
+        // 6. Verify state is stored remotely in Firestore (with retry to handle async sync)
+        var documentSnapshot = firestore.collection("users").document(userId).get().await()
+        var retryCount = 0
+        // Wait up to 10 seconds for the async sync to complete
+        while ((!documentSnapshot.exists() || documentSnapshot.data?.get("claims") == null) && retryCount < 10) {
+            kotlinx.coroutines.delay(1000)
+            documentSnapshot = firestore.collection("users").document(userId).get().await()
+            retryCount++
+        }
 
-        // 6. Verify state is stored remotely in Firestore
-        val documentSnapshot = firestore.collection("users").document(userId).get().await()
-        assertTrue("Firestore user document should exist", documentSnapshot.exists())
+        assertTrue("Firestore user document should exist after sync", documentSnapshot.exists())
 
         val remoteData = documentSnapshot.data
-        assertNotNull("Remote data should not be null. Document path: ${documentSnapshot.reference.path}. User ID: $userId", remoteData)
+        assertNotNull("Remote data should not be null. Path: ${documentSnapshot.reference.path}", remoteData)
 
         // Verify claims map matches what was toggled
         @Suppress("UNCHECKED_CAST")
         val claims = remoteData?.get("claims") as? Map<String, Any>
-        assertNotNull("Claims map in Firestore should not be null. Got data: $remoteData", claims)
+        assertNotNull("Claims map in Firestore should not be null. Got keys: ${remoteData?.keys}", claims)
 
         @Suppress("UNCHECKED_CAST")
         val cardClaims = claims?.get("test_platinum_card") as? Map<String, Any>
-        assertNotNull("test_platinum_card claims should exist in Firestore. Got claims keys: ${claims?.keys}", cardClaims)
+        assertNotNull("test_platinum_card claims missing. Keys: ${claims?.keys}", cardClaims)
 
         @Suppress("UNCHECKED_CAST")
         val yearClaims = cardClaims?.get("2026") as? Map<String, Any>
-        assertNotNull("2026 claims should exist in Firestore. Got year keys: ${cardClaims?.keys}", yearClaims)
+        assertNotNull("2026 claims missing. Keys: ${cardClaims?.keys}", yearClaims)
 
         @Suppress("UNCHECKED_CAST")
         val benefitClaims = yearClaims?.get("test_uber_cash") as? Map<String, Any>
-        assertNotNull("test_uber_cash claims should exist in Firestore. Got benefit keys: ${yearClaims?.keys}", benefitClaims)
+        assertNotNull("test_uber_cash claims missing. Keys: ${yearClaims?.keys}", benefitClaims)
 
         @Suppress("UNCHECKED_CAST")
         val periodClaims = benefitClaims?.get("06") as? Map<String, Any>
-        assertNotNull("06 claims should exist in Firestore. Got period keys: ${benefitClaims?.keys}", periodClaims)
+        assertNotNull("06 claims missing. Keys: ${benefitClaims?.keys}", periodClaims)
 
         assertEquals("Synced amount mismatch", 15.0, (periodClaims?.get("a") as? Number)?.toDouble())
     }

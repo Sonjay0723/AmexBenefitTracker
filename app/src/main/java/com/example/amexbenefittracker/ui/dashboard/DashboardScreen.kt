@@ -41,8 +41,11 @@ import com.example.amexbenefittracker.domain.model.CardSummary
 import com.example.amexbenefittracker.ui.auth.AuthViewModel
 import com.example.amexbenefittracker.ui.theme.*
 import java.util.*
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel) {
     val cards by viewModel.cards.collectAsState()
@@ -53,6 +56,17 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
     val currentUser by authViewModel.currentUser.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val focusManager = LocalFocusManager.current
+
+    if (android.os.Build.VERSION.SDK_INT >= 33) {
+        val permissionState = rememberPermissionState(
+            permission = "android.permission.POST_NOTIFICATIONS"
+        )
+        LaunchedEffect(Unit) {
+            if (!permissionState.status.isGranted) {
+                permissionState.launchPermissionRequest()
+            }
+        }
+    }
 
     LaunchedEffect(currentUser) {
         if (currentUser != null) {
