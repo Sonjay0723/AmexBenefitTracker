@@ -6,6 +6,7 @@ import com.example.amexbenefittracker.data.local.AppDatabase
 import com.example.amexbenefittracker.data.local.DatabaseInitializer
 import com.example.amexbenefittracker.data.repository.AuthRepository
 import com.example.amexbenefittracker.data.repository.BenefitRepository
+import com.example.amexbenefittracker.data.remote.PlaidManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,13 +32,18 @@ class AmexApplication : Application() {
             database.cardDao(),
             database.benefitDao(),
             database.usageHistoryDao(),
+            database.transactionDao(),
             applicationScope
         )
     }
 
+
     val authRepository by lazy { AuthRepository() }
 
+    val plaidManager by lazy { PlaidManager(this) }
+
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
 
     override fun onCreate() {
         super.onCreate()

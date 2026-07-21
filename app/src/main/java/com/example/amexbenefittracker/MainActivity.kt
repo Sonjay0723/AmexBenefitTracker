@@ -20,8 +20,12 @@ import com.example.amexbenefittracker.ui.theme.Slate950
 class MainActivity : ComponentActivity() {
     
     private val dashboardViewModel: DashboardViewModel by viewModels {
-        DashboardViewModel.Factory((application as AmexApplication).repository)
+        DashboardViewModel.Factory(
+            (application as AmexApplication).repository,
+            (application as AmexApplication).plaidManager
+        )
     }
+
 
     private val authViewModel: AuthViewModel by viewModels {
         AuthViewModel.Factory((application as AmexApplication).authRepository)

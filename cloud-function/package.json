@@ -1,0 +1,13 @@
+{
+  "name": "plaid-broker-function",
+  "version": "1.0.0",
+  "description": "GCP Cloud Function Broker to proxy Plaid requests and inject credentials",
+  "main": "index.js",
+  "scripts": {
+    "start": "npx @google-cloud/functions-framework --target=plaidBroker"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.4.2",
+    "axios": "^1.7.9"
+  }
+}

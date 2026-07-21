@@ -10,6 +10,10 @@ import com.example.amexbenefittracker.data.local.entities.UsageHistory
 import com.example.amexbenefittracker.domain.model.CardSummary
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.example.amexbenefittracker.data.local.dao.TransactionDao
+import com.example.amexbenefittracker.data.local.entities.Transaction
+import com.example.amexbenefittracker.data.remote.PlaidTransaction
+import com.example.amexbenefittracker.data.remote.PlaidManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -21,10 +25,13 @@ class BenefitRepository(
     private val cardDao: CardDao,
     private val benefitDao: BenefitDao,
     private val usageHistoryDao: UsageHistoryDao,
+    private val transactionDao: TransactionDao,
     private val externalScope: CoroutineScope,
 ) {
-    private val firestore = FirebaseFirestore.getInstance()
-    private val auth = FirebaseAuth.getInstance()
+
+    private val firestore by lazy { FirebaseFirestore.getInstance() }
+    private val auth by lazy { FirebaseAuth.getInstance() }
+
 
     private val _trackingYear = MutableStateFlow(Calendar.getInstance(TimeZone.getTimeZone("America/New_York")).get(Calendar.YEAR).toString())
     val trackingYear: StateFlow<String> = _trackingYear.asStateFlow()
@@ -130,10 +137,12 @@ class BenefitRepository(
 
     suspend fun resetAllTracking() {
         usageHistoryDao.deleteAllUsage()
+        transactionDao.deleteAllTransactions()
         val cards = cardDao.getAllCardsDirect()
         cards.forEach { card ->
             cardDao.updateCard(card.copy(corporateCreditClaimed = false))
         }
+
         
         // Also clear cloud data
         val userId = auth.currentUser?.uid ?: return
@@ -353,8 +362,169 @@ class BenefitRepository(
     suspend fun insertCard(card: Card): Long = cardDao.insertCard(card)
     suspend fun insertBenefit(benefit: Benefit): Long = benefitDao.insertBenefit(benefit)
 
+    suspend fun getBenefitsByName(name: String): List<Benefit> = benefitDao.getBenefitsByName(name)
+
     suspend fun deleteBenefitByName(name: String) {
         usageHistoryDao.deleteUsageForBenefitByName(name)
         benefitDao.deleteBenefitByName(name)
     }
+
+    fun getTransactionsForCard(cardId: Long): Flow<List<Transaction>> =
+        transactionDao.getTransactionsForCard(cardId)
+
+    suspend fun clearAllTransactions() {
+        transactionDao.deleteAllTransactions()
+    }
+
+    suspend fun processSyncedTransactions(
+        plaidTransactions: List<PlaidTransaction>,
+        plaidManager: PlaidManager
+    ) {
+        val cards = cardDao.getAllCardsDirect()
+        val localTransactions = mutableListOf<Transaction>()
+
+        for (pt in plaidTransactions) {
+            val cardId = plaidManager.getCardIdForPlaidAccount(pt.accountId) ?: 0L
+            val dateMillis = parsePlaidDate(pt.date)
+
+            var matchedBenefitId: Long? = null
+            var matchedBenefitName: String? = null
+            var matchedPeriod: String? = null
+
+            if (cardId > 0L) {
+                val benefits = benefitDao.getBenefitsForCardDirect(cardId)
+                for (benefit in benefits) {
+                    if (matchTransactionToBenefit(pt.name, benefit.name)) {
+                        val period = getPeriodIdentifier(dateMillis, benefit.type)
+                        autoCheckBenefit(benefit, period, dateMillis)
+                        matchedBenefitId = benefit.id
+                        matchedBenefitName = benefit.name
+                        matchedPeriod = period
+                        break
+                    }
+                }
+            }
+
+            localTransactions.add(
+                Transaction(
+                    id = pt.transactionId,
+                    cardId = cardId,
+                    description = pt.name,
+                    amount = pt.amount,
+                    date = dateMillis,
+                    matchedBenefitId = matchedBenefitId,
+                    matchedBenefitName = matchedBenefitName,
+                    matchedPeriod = matchedPeriod
+                )
+            )
+        }
+
+        if (localTransactions.isNotEmpty()) {
+            transactionDao.insertTransactions(localTransactions)
+        }
+    }
+
+    private suspend fun autoCheckBenefit(benefit: Benefit, periodIdentifier: String, date: Long) {
+        val existing = usageHistoryDao.getUsageForPeriod(benefit.id, periodIdentifier)
+        if (existing == null) {
+            val amount = when (benefit.type) {
+                BenefitType.MONTHLY -> {
+                    if (periodIdentifier.endsWith("-12")) benefit.decemberValue else benefit.monthlyValue
+                }
+                BenefitType.QUARTERLY -> benefit.quarterlyValue
+                BenefitType.SEMI_ANNUAL -> benefit.semiAnnualValue
+                BenefitType.ANNUAL -> benefit.totalValue
+            }
+            val usage = UsageHistory(
+                benefitId = benefit.id,
+                amountClaimed = amount,
+                dateClaimed = date,
+                periodIdentifier = periodIdentifier
+            )
+            usageHistoryDao.insertUsage(usage)
+
+            // Link Uber Cash logic
+            if (benefit.name == "Uber Cash") {
+                val otherUberBenefits = benefitDao.getBenefitsByName("Uber Cash")
+                otherUberBenefits.forEach { other ->
+                    if (other.id != benefit.id) {
+                        val otherAmount = if (periodIdentifier.endsWith("-12")) other.decemberValue else other.monthlyValue
+                        if (usageHistoryDao.getUsageForPeriod(other.id, periodIdentifier) == null) {
+                            usageHistoryDao.insertUsage(
+                                UsageHistory(
+                                    benefitId = other.id,
+                                    amountClaimed = otherAmount,
+                                    dateClaimed = date,
+                                    periodIdentifier = periodIdentifier
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            syncLocalToFirestore()
+        }
+    }
+
+    private fun parsePlaidDate(dateStr: String): Long {
+        return try {
+            val parts = dateStr.split("-")
+            val year = parts[0].toInt()
+            val month = parts[1].toInt() - 1
+            val day = parts[2].toInt()
+            val cal = Calendar.getInstance(TimeZone.getTimeZone("America/New_York"))
+            cal.set(year, month, day, 12, 0, 0)
+            cal.timeInMillis
+        } catch (e: Exception) {
+            System.currentTimeMillis()
+        }
+    }
+
+    private fun getPeriodIdentifier(dateMillis: Long, type: BenefitType): String {
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("America/New_York"))
+        cal.timeInMillis = dateMillis
+        val year = cal.get(Calendar.YEAR)
+        val month = cal.get(Calendar.MONTH) + 1 // 1-12
+
+        return when (type) {
+            BenefitType.MONTHLY -> "$year-${month.toString().padStart(2, '0')}"
+            BenefitType.QUARTERLY -> {
+                val quarter = when (month) {
+                    in 1..3 -> 1
+                    in 4..6 -> 2
+                    in 7..9 -> 3
+                    else -> 4
+                }
+                "$year-Q$quarter"
+            }
+            BenefitType.SEMI_ANNUAL -> {
+                val half = if (month <= 6) 1 else 2
+                "$year-H$half"
+            }
+            BenefitType.ANNUAL -> "$year-Annual"
+        }
+    }
+
+    fun matchTransactionToBenefit(txName: String, benefitName: String): Boolean {
+        val name = txName.lowercase()
+        return when (benefitName) {
+            "Uber Cash" -> name.contains("uber") && !name.contains("uber one")
+            "Uber One" -> name.contains("uber one")
+            "Hotel Credit" -> name.contains("fine hotels") || name.contains("hotel credit") || name.contains("hotel collection")
+            "Resy Credit" -> name.contains("resy")
+            "Digital Entertainment" -> name.contains("disney") || name.contains("hulu") || name.contains("peacock") || 
+                    name.contains("ny times") || name.contains("new york times") || name.contains("espn") || name.contains("digital entertainment")
+            "lululemon Credit" -> name.contains("lululemon")
+            "Walmart+" -> name.contains("walmart+") || name.contains("walmart plus") || name.contains("wm+ membership")
+            "CLEAR+ Credit" -> name.contains("clear ") || name.contains("clear*") || name.contains("clear me")
+            "Airline Fee Credit" -> name.contains("delta") || name.contains("united air") || name.contains("american air") || 
+                    name.contains("southwest") || name.contains("jetblue") || name.contains("alaska air") || name.contains("hawaiian air") || 
+                    name.contains("spirit air") || name.contains("frontier air")
+            "Dining Credit" -> name.contains("grubhub") || name.contains("shake shack") || name.contains("five guys") || 
+                    name.contains("cheesecake factory") || name.contains("goldbelly") || name.contains("wine.com")
+            "Dunkin' Credit" -> name.contains("dunkin")
+            else -> false
+        }
+    }
 }
+

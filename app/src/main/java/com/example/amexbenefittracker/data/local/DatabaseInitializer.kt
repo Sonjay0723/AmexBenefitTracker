@@ -9,6 +9,22 @@ import kotlinx.coroutines.flow.first
 class DatabaseInitializer(private val repository: BenefitRepository) {
     suspend fun initialize() {
         repository.deleteBenefitByName("Saks Fifth Avenue")
+
+        // Migrate Walmart+ to monthly if it is currently annual in the database
+        val walmartBenefits = repository.getBenefitsByName("Walmart+")
+        for (benefit in walmartBenefits) {
+            if (benefit.type == BenefitType.ANNUAL) {
+                val updatedBenefit = benefit.copy(
+                    description = "$12.95 per month",
+                    totalValue = 155.4,
+                    type = BenefitType.MONTHLY,
+                    monthlyValue = 12.95,
+                    decemberValue = 12.95
+                )
+                repository.insertBenefit(updatedBenefit)
+            }
+        }
+
         val cards = repository.getAllCards().first()
         if (cards.isEmpty()) {
             val platinumId = repository.insertCard(
@@ -80,9 +96,11 @@ class DatabaseInitializer(private val repository: BenefitRepository) {
                 Benefit(
                     cardId = platinumId,
                     name = "Walmart+",
-                    description = "Annual membership credit",
-                    totalValue = 98.0,
-                    type = BenefitType.ANNUAL,
+                    description = "$12.95 per month",
+                    totalValue = 155.4,
+                    type = BenefitType.MONTHLY,
+                    monthlyValue = 12.95,
+                    decemberValue = 12.95,
                     displayOrder = 6
                 ),
                 Benefit(

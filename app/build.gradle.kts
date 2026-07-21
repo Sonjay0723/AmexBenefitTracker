@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,6 +8,13 @@ plugins {
     alias(libs.plugins.jetbrains.kotlin.plugin.serialization)
     alias(libs.plugins.google.services)
 }
+
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(FileInputStream(localPropertiesFile))
+}
+val plaidCloudFunctionUrl = localProperties.getProperty("PLAID_CLOUD_FUNCTION_URL") ?: ""
 
 android {
     namespace = "com.example.amexbenefittracker"
@@ -18,6 +28,8 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        buildConfigField("String", "PLAID_CLOUD_FUNCTION_URL", "\"$plaidCloudFunctionUrl\"")
     }
 
     buildTypes {
@@ -35,8 +47,10 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
+
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
@@ -95,4 +109,5 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     "ksp"(libs.androidx.room.compiler)
     "ksp"(libs.moshi.kotlin.codegen)
-}
+    implementation(libs.plaid.link)
+}
