@@ -514,7 +514,7 @@ class BenefitRepository(
             "Resy Credit" -> name.contains("resy")
             "Digital Entertainment" -> name.contains("disney") || name.contains("hulu") || name.contains("peacock") || 
                     name.contains("ny times") || name.contains("new york times") || name.contains("espn") || name.contains("digital entertainment")
-            "lululemon Credit" -> name.contains("lululemon")
+            "Lululemon Credit" -> name.contains("lululemon")
             "Walmart+" -> name.contains("walmart+") || name.contains("walmart plus") || name.contains("wm+ membership")
             "CLEAR+ Credit" -> name.contains("clear ") || name.contains("clear*") || name.contains("clear me")
             "Airline Fee Credit" -> name.contains("delta") || name.contains("united air") || name.contains("american air") || 

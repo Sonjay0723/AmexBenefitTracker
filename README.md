@@ -7,7 +7,7 @@ A modern, high-performance Android application built with Jetpack Compose design
 *   **Dual-Card Dashboard**: Seamlessly switch between American Express Platinum and Gold card profiles with a premium dark-mode aesthetic.
 *   **Intelligent Tracking**:
     *   **Monthly Credits**: Tracking for Uber Cash, Dining Credit, Digital Entertainment, and Dunkin'.
-    *   **Quarterly Credits**: Specialized tracking for Resy and lululemon credits.
+    *   **Quarterly Credits**: Specialized tracking for Resy and Lululemon credits.
     *   **Semi-Annual & Annual**: Tracking for Hotel, CLEAR+, and Airline Fee credits.
 *   **Linked Uber Cash**: Synchronized tracking between cards—checking Uber Cash for one card automatically updates the other for the same month.
 *   **Plaid Transaction Syncing**: Automatically import and check off qualifying transactions via Plaid integration.

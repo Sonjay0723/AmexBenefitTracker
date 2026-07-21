@@ -25,6 +25,15 @@ class DatabaseInitializer(private val repository: BenefitRepository) {
             }
         }
 
+        // Migrate lululemon Credit to Lululemon Credit if it exists in the database
+        val lululemonBenefits = repository.getBenefitsByName("lululemon Credit")
+        for (benefit in lululemonBenefits) {
+            val updatedBenefit = benefit.copy(
+                name = "Lululemon Credit"
+            )
+            repository.insertBenefit(updatedBenefit)
+        }
+
         val cards = repository.getAllCards().first()
         if (cards.isEmpty()) {
             val platinumId = repository.insertCard(
@@ -86,7 +95,7 @@ class DatabaseInitializer(private val repository: BenefitRepository) {
                 ),
                 Benefit(
                     cardId = platinumId,
-                    name = "lululemon Credit",
+                    name = "Lululemon Credit",
                     description = "$75 per quarter",
                     totalValue = 300.0,
                     type = BenefitType.QUARTERLY,
