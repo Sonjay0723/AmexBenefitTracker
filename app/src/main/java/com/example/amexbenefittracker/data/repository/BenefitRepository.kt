@@ -386,6 +386,7 @@ class BenefitRepository(
         for (pt in plaidTransactions) {
             val cardId = plaidManager.getCardIdForPlaidAccount(pt.accountId) ?: 0L
             val dateMillis = parsePlaidDate(pt.date)
+            val txName = pt.originalDescription ?: pt.name
 
             var matchedBenefitId: Long? = null
             var matchedBenefitName: String? = null
@@ -394,7 +395,7 @@ class BenefitRepository(
             if (cardId > 0L) {
                 val benefits = benefitDao.getBenefitsForCardDirect(cardId)
                 for (benefit in benefits) {
-                    if (matchTransactionToBenefit(pt.name, benefit.name)) {
+                    if (matchTransactionToBenefit(txName, benefit.name, pt.amount)) {
                         val period = getPeriodIdentifier(dateMillis, benefit.type)
                         autoCheckBenefit(benefit, period, dateMillis)
                         matchedBenefitId = benefit.id
@@ -409,7 +410,7 @@ class BenefitRepository(
                 Transaction(
                     id = pt.transactionId,
                     cardId = cardId,
-                    description = pt.name,
+                    description = txName,
                     amount = pt.amount,
                     date = dateMillis,
                     matchedBenefitId = matchedBenefitId,
@@ -421,6 +422,36 @@ class BenefitRepository(
 
         if (localTransactions.isNotEmpty()) {
             transactionDao.insertTransactions(localTransactions)
+        }
+    }
+
+    suspend fun reprocessExistingTransactions() {
+        val allCards = cardDao.getAllCardsDirect()
+        for (card in allCards) {
+            val transactions = transactionDao.getTransactionsForCardDirect(card.id)
+            val benefits = benefitDao.getBenefitsForCardDirect(card.id)
+            val updated = mutableListOf<Transaction>()
+            for (tx in transactions) {
+                if (tx.matchedBenefitName == null) {
+                    for (benefit in benefits) {
+                        if (matchTransactionToBenefit(tx.description, benefit.name, tx.amount)) {
+                            val period = getPeriodIdentifier(tx.date, benefit.type)
+                            autoCheckBenefit(benefit, period, tx.date)
+                            updated.add(
+                                tx.copy(
+                                    matchedBenefitId = benefit.id,
+                                    matchedBenefitName = benefit.name,
+                                    matchedPeriod = period
+                                )
+                            )
+                            break
+                        }
+                    }
+                }
+            }
+            if (updated.isNotEmpty()) {
+                transactionDao.insertTransactions(updated)
+            }
         }
     }
 
@@ -505,7 +536,7 @@ class BenefitRepository(
         }
     }
 
-    fun matchTransactionToBenefit(txName: String, benefitName: String): Boolean {
+    fun matchTransactionToBenefit(txName: String, benefitName: String, amount: Double = 0.0): Boolean {
         val name = txName.lowercase()
         return when (benefitName) {
             "Uber Cash" -> name.contains("uber") && !name.contains("uber one")
@@ -515,13 +546,24 @@ class BenefitRepository(
             "Digital Entertainment" -> name.contains("disney") || name.contains("hulu") || name.contains("peacock") || 
                     name.contains("ny times") || name.contains("new york times") || name.contains("espn") || name.contains("digital entertainment")
             "Lululemon Credit" -> name.contains("lululemon")
-            "Walmart+" -> name.contains("walmart+") || name.contains("walmart plus") || name.contains("wm+ membership")
+            "Walmart+" -> {
+                val isExplicitWalmartPlus = name.contains("walmart+") || name.contains("walmart plus") || name.contains("wm+ membership")
+                if (isExplicitWalmartPlus) {
+                    true
+                } else if (name.contains("walmart")) {
+                    val absAmount = kotlin.math.abs(amount)
+                    amount < 0 && absAmount >= 12.00 && absAmount <= 15.00
+                } else {
+                    false
+                }
+            }
             "CLEAR+ Credit" -> name.contains("clear ") || name.contains("clear*") || name.contains("clear me")
             "Airline Fee Credit" -> name.contains("delta") || name.contains("united air") || name.contains("american air") || 
                     name.contains("southwest") || name.contains("jetblue") || name.contains("alaska air") || name.contains("hawaiian air") || 
                     name.contains("spirit air") || name.contains("frontier air")
-            "Dining Credit" -> name.contains("grubhub") || name.contains("shake shack") || name.contains("five guys") || 
-                    name.contains("cheesecake factory") || name.contains("goldbelly") || name.contains("wine.com")
+            "Dining Credit" -> name.contains("dining credit") || name.contains("dining") || name.contains("grubhub") || 
+                    name.contains("shake shack") || name.contains("five guys") || name.contains("cheesecake factory") || 
+                    name.contains("goldbelly") || name.contains("wine.com")
             "Dunkin' Credit" -> name.contains("dunkin")
             else -> false
         }

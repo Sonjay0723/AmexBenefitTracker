@@ -58,6 +58,8 @@ data class PlaidTransaction(
     @Json(name = "amount") val amount: Double,
     @Json(name = "date") val date: String, // YYYY-MM-DD
     @Json(name = "name") val name: String,
+    @Json(name = "original_description") val originalDescription: String? = null,
+    @Json(name = "merchant_name") val merchantName: String? = null,
     @Json(name = "pending") val pending: Boolean
 )
 

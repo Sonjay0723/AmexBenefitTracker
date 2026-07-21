@@ -81,11 +81,13 @@ class TransactionMatchingTest {
 
         // Dunkin' matches
         assertTrue(repository.matchTransactionToBenefit("DUNKIN DONUTS #3492", "Dunkin' Credit"))
+        assertTrue(repository.matchTransactionToBenefit("AMEX DUNKIN' CREDIT", "Dunkin' Credit", -7.00))
 
         // Dining matches
         assertTrue(repository.matchTransactionToBenefit("GRUBHUB*CHICAGO", "Dining Credit"))
         assertTrue(repository.matchTransactionToBenefit("SHAKE SHACK NEW YORK", "Dining Credit"))
         assertTrue(repository.matchTransactionToBenefit("THE CHEESECAKE FACTORY", "Dining Credit"))
+        assertTrue(repository.matchTransactionToBenefit("AMEX Dining Credit", "Dining Credit", -10.00))
 
         // Resy matches
         assertTrue(repository.matchTransactionToBenefit("RESY.COM DINING SEATTLE", "Resy Credit"))
@@ -95,6 +97,11 @@ class TransactionMatchingTest {
 
         // Walmart+ matches
         assertTrue(repository.matchTransactionToBenefit("WALMART PLUS MONTHLY", "Walmart+"))
+        assertTrue(repository.matchTransactionToBenefit("WALMART", "Walmart+", -12.95))
+        assertTrue(repository.matchTransactionToBenefit("Walmart", "Walmart+", -13.81))
+        assertTrue(repository.matchTransactionToBenefit("WALMART STORE #4920", "Walmart+", -13.84))
+        assertFalse(repository.matchTransactionToBenefit("WALMART GROCERY", "Walmart+", 13.00))
+        assertFalse(repository.matchTransactionToBenefit("WALMART GROCERY", "Walmart+", -50.00))
 
         // Unmatched remains false
         assertFalse(repository.matchTransactionToBenefit("TARGET STORE #2031", "Uber Cash"))

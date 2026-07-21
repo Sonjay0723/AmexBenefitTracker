@@ -78,6 +78,7 @@ class DashboardViewModel(
 
     init {
         viewModelScope.launch {
+            repository.reprocessExistingTransactions()
             cards.collect { list ->
                 if (_selectedCardId.value == null && list.isNotEmpty()) {
                     _selectedCardId.value = list.find { it.isDefault }?.id ?: list.first().id
@@ -207,6 +208,7 @@ class DashboardViewModel(
                 _plaidError.value = null
                 val newTx = plaidManager.syncTransactions(token)
                 repository.processSyncedTransactions(newTx, plaidManager)
+                repository.reprocessExistingTransactions()
             } catch (e: Exception) {
                 e.printStackTrace()
                 _plaidError.value = "Sync failed: ${e.localizedMessage}"

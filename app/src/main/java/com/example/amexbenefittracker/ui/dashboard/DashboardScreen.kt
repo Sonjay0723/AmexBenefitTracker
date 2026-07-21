@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -45,6 +46,8 @@ import com.plaid.link.result.LinkExit
 import com.plaid.link.result.LinkSuccess
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import java.text.SimpleDateFormat
 import com.example.amexbenefittracker.R
 import com.example.amexbenefittracker.data.local.entities.BenefitType
@@ -218,7 +221,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                                         viewModel.toggleCorporateCredit()
                                     }
                                     EffectiveFeeSection(summary, accentTextColor)
-                                    RecentTransactionsSection(
+                                    RecentCreditsSection(
                                         transactions = transactions,
                                         isRefreshing = isRefreshing,
                                         onSyncClick = { viewModel.syncPlaidTransactions() },
@@ -264,7 +267,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                                             viewModel.toggleCorporateCredit()
                                         }
                                         EffectiveFeeSection(summary, accentTextColor)
-                                        RecentTransactionsSection(
+                                        RecentCreditsSection(
                                             transactions = transactions,
                                             isRefreshing = isRefreshing,
                                             onSyncClick = { viewModel.syncPlaidTransactions() },
@@ -923,13 +926,17 @@ fun EditableYearSubheader(trackingYear: String) {
 }
 
 @Composable
-fun RecentTransactionsSection(
+fun RecentCreditsSection(
     transactions: List<Transaction>,
     isRefreshing: Boolean,
     onSyncClick: () -> Unit,
     accentTextColor: Color
 ) {
+    var isExpanded by rememberSaveable { mutableStateOf(false) }
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
+    val matchedCredits = remember(transactions) {
+        transactions.filter { it.matchedBenefitName != null && it.amount < 0 }
+    }
     
     Surface(
         color = Slate900.copy(alpha = 0.4f),
@@ -940,95 +947,117 @@ fun RecentTransactionsSection(
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val opening = !isExpanded
+                        isExpanded = opening
+                        if (opening) {
+                            onSyncClick()
+                        }
+                    },
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Recent Transactions",
+                    text = "Recent Credits",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = TextWhite
                 )
                 
                 IconButton(
-                    onClick = onSyncClick,
+                    onClick = {
+                        val opening = !isExpanded
+                        isExpanded = opening
+                        if (opening) {
+                            onSyncClick()
+                        }
+                    },
                     enabled = !isRefreshing
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Sync Transactions",
+                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isExpanded) "Collapse Recent Credits" else "Expand Recent Credits",
                         tint = accentTextColor
                     )
                 }
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            if (transactions.isEmpty()) {
-                Text(
-                    text = "No recent transactions linked yet. Open Settings and connect your Amex card via Plaid.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Slate500,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    transactions.take(5).forEachIndexed { index, tx ->
-                        if (index > 0) {
-                            HorizontalDivider(color = Slate800, thickness = 1.dp)
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = tx.description,
-                                    color = TextWhite,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = dateFormat.format(Date(tx.date)),
-                                        color = Slate500,
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                    if (tx.matchedBenefitName != null) {
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Surface(
-                                            color = Emerald400.copy(alpha = 0.1f),
-                                            shape = RoundedCornerShape(4.dp)
-                                        ) {
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    if (matchedCredits.isEmpty()) {
+                        Text(
+                            text = "No recent credits linked yet. Open Settings and connect your Amex card via Plaid.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Slate500,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            matchedCredits.take(5).forEachIndexed { index, tx ->
+                                if (index > 0) {
+                                    HorizontalDivider(color = Slate800, thickness = 1.dp)
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = tx.description,
+                                            color = TextWhite,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
-                                                text = "✓ ${tx.matchedBenefitName}",
-                                                color = Emerald400,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                fontWeight = FontWeight.Bold
+                                                text = dateFormat.format(Date(tx.date)),
+                                                color = Slate500,
+                                                style = MaterialTheme.typography.bodySmall
                                             )
+                                            if (tx.matchedBenefitName != null) {
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Surface(
+                                                    color = Emerald400.copy(alpha = 0.1f),
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "✓ ${tx.matchedBenefitName}",
+                                                        color = Emerald400,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
+                                    
+                                    val isCredit = tx.amount < 0
+                                    val amtText = if (isCredit) {
+                                        "-$${String.format("%.2f", -tx.amount)}"
+                                    } else {
+                                        "$${String.format("%.2f", tx.amount)}"
+                                    }
+                                    Text(
+                                        text = amtText,
+                                        color = if (isCredit) Emerald400 else TextWhite,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
                                 }
                             }
-                            
-                            val isCredit = tx.amount < 0
-                            val amtText = if (isCredit) {
-                                "-$${String.format("%.2f", -tx.amount)}"
-                            } else {
-                                "$${String.format("%.2f", tx.amount)}"
-                            }
-                            Text(
-                                text = amtText,
-                                color = if (isCredit) Emerald400 else TextWhite,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
                         }
                     }
                 }
