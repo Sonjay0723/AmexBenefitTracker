@@ -25,7 +25,7 @@ A modern, high-performance Android application built with Jetpack Compose design
 *   **UI Framework**: Jetpack Compose (Material 3)
 *   **Architecture**: MVVM with Repository pattern
 *   **Database**: Room & Shared Preferences
-*   **Backend / Middleware**: GCP Cloud Functions (Node.js) & Firebase SDK
+*   **Backend / Middleware**: Cloudflare Workers (Edge Functions) & Firebase SDK
 *   **Bank Syncing**: Plaid API & Plaid Link SDK
 *   **Concurrency**: Kotlin Coroutines & Flow
 
@@ -33,15 +33,14 @@ A modern, high-performance Android application built with Jetpack Compose design
 
 ## Setup & Configuration Guide
 
-Follow these step-by-step instructions to set up your own Plaid developer account, GCP Cloud Function broker, and Firebase project to build and run the application.
+Follow these step-by-step instructions to set up your own Plaid developer account, Cloudflare Worker broker, and Firebase project to build and run the application.
 
 ### Prerequisites
 
 *   [Android Studio](https://developer.android.com/studio) (Koala / Ladybug or newer) with JDK 11+
 *   [Node.js](https://nodejs.org/) (v18+)
-*   [Google Cloud SDK (`gcloud` CLI)](https://cloud.google.com/sdk/docs/install)
 *   A [Plaid Developer Account](https://dashboard.plaid.com/signup)
-*   A [Google Cloud Platform (GCP)](https://console.cloud.google.com/) Account
+*   A free [Cloudflare Account](https://dash.cloudflare.com/sign-up)
 *   A [Firebase](https://console.firebase.google.com/) Account
 
 ---
@@ -55,34 +54,26 @@ Follow these step-by-step instructions to set up your own Plaid developer accoun
 
 ---
 
-### Step 2: Deploy the GCP Cloud Function Broker
+### Step 2: Deploy the Cloudflare Worker Broker (100% Free)
 
-To protect your Plaid credentials, the app routes Plaid API requests through a secure Google Cloud Function located in `./cloud-function`.
+To protect your Plaid credentials, the app routes Plaid API requests through a secure Cloudflare Worker located in `./cloudflare-worker`.
 
-1. Authenticate with Google Cloud CLI:
-   ```bash
-   gcloud auth login
-   gcloud config set project YOUR_GCP_PROJECT_ID
-   ```
-2. Navigate to the `cloud-function` folder in your terminal:
-   ```bash
-   cd cloud-function
-   ```
-3. Deploy the Cloud Function:
-   ```bash
-   gcloud functions deploy plaidBroker \
-     --gen2 \
-     --runtime=nodejs20 \
-     --region=us-central1 \
-     --source=. \
-     --entry-point=plaidBroker \
-     --trigger-http \
-     --allow-unauthenticated \
-     --set-env-vars PLAID_CLIENT_ID=YOUR_PLAID_CLIENT_ID,PLAID_SECRET=YOUR_PLAID_SECRET,PLAID_ENV=sandbox
-   ```
-   > **Note**: Replace `YOUR_GCP_PROJECT_ID`, `YOUR_PLAID_CLIENT_ID`, and `YOUR_PLAID_SECRET` with your actual credentials. Change `PLAID_ENV` to `development` or `production` when ready for live data.
+#### Option A: Using Cloudflare Web Dashboard
+1. Log into your [Cloudflare Dashboard](https://dash.cloudflare.com/).
+2. Go to **Workers & Pages** -> Click **Create Application** -> **Create Worker**.
+3. Name your Worker (e.g., `amex-plaid-broker`) and click **Deploy**.
+4. Click **Edit Code**, replace the contents of `worker.js` with the code in `./cloudflare-worker/worker.js`, and click **Deploy**.
+5. Go to **Settings** -> **Variables & Secrets**, add secret variables `PLAID_CLIENT_ID`, `PLAID_SECRET`, and `PLAID_ENV` (`sandbox` or `production`), and save.
 
-4. Once deployment succeeds, copy the **HTTPS Trigger URL** from the terminal output (e.g., `https://plaid-broker-xxxxxx-uc.a.run.app` or `https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net/plaidBroker`).
+#### Option B: Using Wrangler CLI
+```bash
+cd cloudflare-worker
+npx wrangler login
+npx wrangler secret put PLAID_CLIENT_ID
+npx wrangler secret put PLAID_SECRET
+npx wrangler secret put PLAID_ENV
+npx wrangler deploy
+```
 
 ---
 
@@ -107,11 +98,11 @@ To protect your Plaid credentials, the app routes Plaid API requests through a s
 
 ### Step 4: Configure `local.properties` & Build the App
 
-1. In the root directory of the project, edit (or create) the `local.properties` file and add your deployed Cloud Function URL:
+1. In the root directory of the project, edit (or create) the `local.properties` file and add your deployed Cloudflare Worker URL:
    ```properties
-   PLAID_CLOUD_FUNCTION_URL=https://YOUR_DEPLOYED_CLOUD_FUNCTION_URL
+   PLAID_CLOUD_FUNCTION_URL=https://amex-plaid-broker.jpitta0723.workers.dev/
    ```
-   > **Tip**: You can also configure or override this Cloud Function URL directly inside the app's **Settings UI** at runtime.
+   > **Tip**: You can also configure or override this Worker URL directly inside the app's **Settings UI** at runtime.
 
 2. Open the project in **Android Studio**.
 3. Sync the project with Gradle files (`File` > `Sync Project with Gradle Files`).
@@ -132,4 +123,3 @@ To protect your Plaid credentials, the app routes Plaid API requests through a s
 ---
 
 *Disclaimer: This is an independent tracking tool and is not affiliated with American Express.*
-

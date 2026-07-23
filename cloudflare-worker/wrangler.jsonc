@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "amex-plaid-broker",
+  "main": "worker.js",
+  "compatibility_date": "2024-03-01",
+  "observability": {
+    "enabled": true
+  }
+}
