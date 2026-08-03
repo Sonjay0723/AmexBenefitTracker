@@ -5,6 +5,7 @@ import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.*
@@ -41,12 +42,19 @@ fun AmexOfferWebViewScreen(
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var autoScanActive by remember { mutableStateOf(true) }
 
+    fun runInjection(wv: WebView?) {
+        wv?.let {
+            it.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
+            it.loadUrl("javascript:$AUTO_ACTIVATOR_JS_SCRIPT")
+        }
+    }
+
     // Coroutine Poller bound to webViewInstance
     LaunchedEffect(webViewInstance, autoScanActive) {
         if (webViewInstance == null || !autoScanActive) return@LaunchedEffect
         
         while (autoScanActive) {
-            delay(2500)
+            delay(2000)
             webViewInstance?.let { webView ->
                 withContext(Dispatchers.Main) {
                     val currentUrl = webView.url ?: ""
@@ -57,7 +65,7 @@ fun AmexOfferWebViewScreen(
                         webView.loadUrl(issuer.offersUrl)
                     } else if (currentUrl.contains("offers") || currentUrl.contains("eligible") || currentUrl.contains("account")) {
                         isActivating = true
-                        webView.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
+                        runInjection(webView)
                     }
                 }
             }
@@ -103,8 +111,8 @@ fun AmexOfferWebViewScreen(
                         Button(
                             onClick = {
                                 isActivating = true
-                                statusText = "Scanning page for (+) offer buttons..."
-                                webViewInstance?.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
+                                statusText = "Scanning page for offer buttons..."
+                                runInjection(webViewInstance)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -140,6 +148,7 @@ fun AmexOfferWebViewScreen(
                             settings.useWideViewPort = true
                             settings.loadWithOverviewMode = true
                             settings.javaScriptCanOpenWindowsAutomatically = true
+                            settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             settings.userAgentString =
                                 "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Mobile Safari/537.36"
 
@@ -188,7 +197,7 @@ fun AmexOfferWebViewScreen(
                                     if (currentUrl.contains("offers") || currentUrl.contains("eligible")) {
                                         statusText = "Offers page detected. Launching activator..."
                                         isActivating = true
-                                        view?.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
+                                        runInjection(view)
                                     }
                                 }
                             }
@@ -263,7 +272,6 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
                 const hasPlusIcon = text === '+' || text.includes('+') || ariaLabel.includes('+') || hasSvg;
 
                 if (isInteractive || hasPlusIcon) {
-                    // Prevent duplicates
                     if (!actionButtons.includes(el) && !actionButtons.includes(el.parentElement)) {
                         actionButtons.push(el);
                     }
@@ -277,14 +285,13 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
     async function executeActivation() {
         notify("Scanning page for offer buttons...");
 
-        // Scroll down to load all dynamic React offer cards
         window.scrollBy(0, 400);
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 600));
 
         const buttons = findOfferCardActionButtons();
 
         if (buttons.length === 0) {
-            notify("No unactivated (+) offer buttons found on screen.");
+            notify("No unactivated offer buttons found on screen.");
             if (window.AndroidBridge) {
                 window.AndroidBridge.onOffersActivated(0);
             }
@@ -300,6 +307,7 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
                 btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 
                 // Dispatch full touch and click event suite for React SPA compatibility
+                btn.focus();
                 btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
                 btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
                 btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
