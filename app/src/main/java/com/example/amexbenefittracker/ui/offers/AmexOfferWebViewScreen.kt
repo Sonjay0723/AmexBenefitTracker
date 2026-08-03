@@ -24,7 +24,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.amexbenefittracker.ui.theme.Slate900
 import com.example.amexbenefittracker.ui.theme.Slate950
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
@@ -39,21 +41,24 @@ fun AmexOfferWebViewScreen(
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var autoScanActive by remember { mutableStateOf(true) }
 
-    // Continuous 2-second URL & DOM Poller Loop in Kotlin
-    // Solves Single Page Application (React SPA) route changes where onPageFinished does not re-trigger!
-    LaunchedEffect(autoScanActive) {
+    // Coroutine Poller bound to webViewInstance
+    LaunchedEffect(webViewInstance, autoScanActive) {
+        if (webViewInstance == null || !autoScanActive) return@LaunchedEffect
+        
         while (autoScanActive) {
-            delay(2000)
+            delay(2500)
             webViewInstance?.let { webView ->
-                val currentUrl = webView.url ?: ""
-                Log.d("AmexOfferWebView", "Polling URL: $currentUrl")
+                withContext(Dispatchers.Main) {
+                    val currentUrl = webView.url ?: ""
+                    Log.d("AmexOfferWebView", "Polling URL: $currentUrl")
 
-                if (currentUrl.contains("dashboard") || currentUrl.contains("account/summary")) {
-                    statusText = "Logged in! Redirecting to Amex Offers..."
-                    webView.loadUrl(issuer.offersUrl)
-                } else if (currentUrl.contains("offers") || currentUrl.contains("eligible")) {
-                    isActivating = true
-                    webView.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
+                    if (currentUrl.contains("dashboard") || currentUrl.contains("account/summary")) {
+                        statusText = "Logged in! Redirecting to Amex Offers..."
+                        webView.loadUrl(issuer.offersUrl)
+                    } else if (currentUrl.contains("offers") || currentUrl.contains("eligible") || currentUrl.contains("account")) {
+                        isActivating = true
+                        webView.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
+                    }
                 }
             }
         }
@@ -102,12 +107,12 @@ fun AmexOfferWebViewScreen(
                                 webViewInstance?.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            modifier = Modifier.padding(end = 8.dp)
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(end = 4.dp)
                         ) {
                             Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Activate Offers Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Activate Offers Now", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                         IconButton(onClick = {
                             webViewInstance?.reload()
@@ -141,7 +146,6 @@ fun AmexOfferWebViewScreen(
                             CookieManager.getInstance().setAcceptCookie(true)
                             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
-                            // Chrome Client for Console Logging
                             webChromeClient = object : WebChromeClient() {
                                 override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                                     val msg = consoleMessage?.message() ?: ""
@@ -157,7 +161,7 @@ fun AmexOfferWebViewScreen(
                                 AmexOfferBridge(
                                     onStatusUpdate = { msg ->
                                         statusText = msg
-                                        if (msg.contains("Activating") || msg.contains("Scanning") || msg.contains("Attempt")) {
+                                        if (msg.contains("Activating") || msg.contains("Scanning") || msg.contains("Attempt") || msg.contains("Found")) {
                                             isActivating = true
                                         }
                                     },
@@ -203,9 +207,6 @@ fun AmexOfferWebViewScreen(
 
 private const val AUTO_ACTIVATOR_JS_SCRIPT = """
 (function launchOfferActivator() {
-    if (window.isActivatingScriptRunning) return;
-    window.isActivatingScriptRunning = true;
-
     function notify(msg) {
         console.log("[AmexOfferActivator] " + msg);
         if (window.AndroidBridge) {
@@ -213,127 +214,112 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
         }
     }
 
-    function getAllButtons(root) {
-        let list = Array.from(root.querySelectorAll('button, div[role="button"], span[role="button"], a[role="button"], svg'));
-        // Include buttons inside shadow roots if present
-        const allElements = Array.from(root.querySelectorAll('*'));
+    function findOfferCardActionButtons() {
+        const allElements = Array.from(document.querySelectorAll('*'));
+        const actionButtons = [];
+
         allElements.forEach(el => {
-            if (el.shadowRoot) {
-                list = list.concat(getAllButtons(el.shadowRoot));
-            }
-        });
-        return list;
-    }
+            if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
 
-    function getEligibleButtons() {
-        const candidates = getAllButtons(document);
-        
-        return candidates.filter(el => {
-            if (el.offsetWidth === 0 && el.offsetHeight === 0) return false;
-
-            const text = (el.innerText || '').trim().toLowerCase();
+            const text = (el.innerText || '').trim();
+            const lowerText = text.toLowerCase();
             const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
             const title = (el.getAttribute('title') || '').toLowerCase();
-            const testId = (el.getAttribute('data-testid') || '').toLowerCase();
             const className = (el.className || '').toString().toLowerCase();
 
-            const isDirectAdd = text.includes('add to card') || text.includes('activate offer') || text.includes('enroll') || 
-                                ariaLabel.includes('add') || title.includes('add') || testId.includes('add') || className.includes('add');
-            const isAlreadyAdded = text.includes('added') || text.includes('activated') || ariaLabel.includes('added') || ariaLabel.includes('activated');
-            
-            if (isAlreadyAdded) return false;
-            if (isDirectAdd) return true;
+            // Ignore navigation, details, and terms links
+            if (lowerText.includes('view details') || lowerText.includes('terms apply') || 
+                lowerText.includes('filter') || lowerText.includes('sort') || lowerText.includes('search') ||
+                lowerText.includes('log out') || lowerText.includes('added to card') || lowerText.includes('activated')) {
+                return;
+            }
 
-            // Structural Card Matching for Mobile Layout (+ Circular Buttons):
+            // 1. Direct Text / Aria Match
+            if (lowerText.includes('add to card') || lowerText.includes('activate offer') || lowerText.includes('enroll') || 
+                ariaLabel.includes('add to card') || ariaLabel.includes('activate offer') || title.includes('add to card')) {
+                actionButtons.push(el);
+                return;
+            }
+
+            // 2. Structural Match inside Offer Card Container
             let parent = el.parentElement;
-            let isInsideOfferCard = false;
+            let isOfferCard = false;
             let depth = 0;
-            while (parent && depth < 7) {
+
+            while (parent && depth < 8) {
                 const pText = (parent.innerText || '').toLowerCase();
                 if (pText.includes('terms apply') || pText.includes('view details') || pText.includes('spend') || pText.includes('earn')) {
-                    isInsideOfferCard = true;
+                    isOfferCard = true;
                     break;
                 }
                 parent = parent.parentElement;
                 depth++;
             }
 
-            if (isInsideOfferCard) {
-                if (text.includes('view details') || text.includes('terms apply') || text.includes('filter') || text.includes('sort') || text.includes('search')) {
-                    return false;
-                }
-
+            if (isOfferCard) {
+                const isInteractive = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || 
+                                      el.classList.contains('btn') || className.includes('button') || className.includes('add');
                 const hasSvg = el.querySelector('svg') !== null || el.tagName.toLowerCase() === 'svg';
-                const hasPlus = text === '+' || text.includes('+') || ariaLabel.includes('+');
-                const isClickableIcon = hasSvg || hasPlus || el.children.length > 0;
-                
-                if (isClickableIcon) return true;
-            }
+                const hasPlusIcon = text === '+' || text.includes('+') || ariaLabel.includes('+') || hasSvg;
 
-            return false;
+                if (isInteractive || hasPlusIcon) {
+                    // Prevent duplicates
+                    if (!actionButtons.includes(el) && !actionButtons.includes(el.parentElement)) {
+                        actionButtons.push(el);
+                    }
+                }
+            }
         });
+
+        return actionButtons;
     }
 
-    let attempts = 0;
-    const maxAttempts = 10;
-    let totalActivated = 0;
+    async function executeActivation() {
+        notify("Scanning page for offer buttons...");
 
-    async function scanAndProcess() {
-        attempts++;
-        notify("Scanning DOM for (+) offer buttons (Attempt " + attempts + "/" + maxAttempts + ")...");
-        
-        window.scrollBy(0, 450);
+        // Scroll down to load all dynamic React offer cards
+        window.scrollBy(0, 400);
+        await new Promise(r => setTimeout(r, 800));
 
-        const buttons = getEligibleButtons();
+        const buttons = findOfferCardActionButtons();
 
-        if (buttons.length > 0) {
-            notify("Found " + buttons.length + " (+) offer button(s). Activating...");
-            for (let i = 0; i < buttons.length; i++) {
-                try {
-                    const btn = buttons[i];
-                    btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    
-                    // Dispatch explicit pointer & mouse click events for React touch compatibility
-                    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-                    btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-                    btn.click();
-
-                    totalActivated++;
-                    notify("Activated " + totalActivated + " of " + buttons.length + " offers...");
-                    await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
-                } catch (e) {
-                    console.error("Click error:", e);
-                }
-            }
-            
-            window.scrollBy(0, 500);
-            await new Promise(r => setTimeout(r, 1500));
-            const extraButtons = getEligibleButtons();
-            if (extraButtons.length > 0 && attempts < maxAttempts) {
-                scanAndProcess();
-                return;
-            }
-
-            notify("Finished activating " + totalActivated + " offer(s)!");
+        if (buttons.length === 0) {
+            notify("No unactivated (+) offer buttons found on screen.");
             if (window.AndroidBridge) {
-                window.AndroidBridge.onComplete(totalActivated);
+                window.AndroidBridge.onOffersActivated(0);
             }
-            window.isActivatingScriptRunning = false;
             return;
         }
 
-        if (attempts < maxAttempts) {
-            notify("Waiting for (+) offer cards to render (Attempt " + attempts + "/" + maxAttempts + ")...");
-            setTimeout(scanAndProcess, 1500);
-        } else {
-            notify("No unactivated offers detected. Tap 'Activate Offers Now' anytime.");
-            if (window.AndroidBridge) {
-                window.AndroidBridge.onComplete(0);
+        notify("Found " + buttons.length + " offer button(s). Activating now...");
+        let count = 0;
+
+        for (let i = 0; i < buttons.length; i++) {
+            try {
+                const btn = buttons[i];
+                btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                // Dispatch full touch and click event suite for React SPA compatibility
+                btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                btn.click();
+
+                count++;
+                notify("Activated " + count + " of " + buttons.length + " offers...");
+                await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
+            } catch (err) {
+                console.error("Click error:", err);
             }
-            window.isActivatingScriptRunning = false;
+        }
+
+        notify("Finished! Activated " + count + " offer(s) successfully.");
+        if (window.AndroidBridge) {
+            window.AndroidBridge.onOffersActivated(count);
         }
     }
 
-    scanAndProcess();
+    executeActivation();
 })();
 """
