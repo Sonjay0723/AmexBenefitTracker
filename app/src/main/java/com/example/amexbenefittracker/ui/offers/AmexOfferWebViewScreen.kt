@@ -11,9 +11,7 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,40 +36,32 @@ fun AmexOfferWebViewScreen(
     issuer: CardIssuer,
     onDismiss: () -> Unit
 ) {
-    var statusText by remember { mutableStateOf("Sign into Amex, then activation will start automatically...") }
+    var statusText by remember { mutableStateOf("Sign into Amex, then tap 'Activate Offers Now'...") }
     var isActivating by remember { mutableStateOf(false) }
     var activatedCount by remember { mutableStateOf(0) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var autoScanActive by remember { mutableStateOf(true) }
-    var isDesktopMode by remember { mutableStateOf(true) } // Default to Desktop site mode for cleaner DOM buttons
 
     val desktopUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    val mobileUserAgent = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Mobile Safari/537.36"
 
-    fun runInjection(wv: WebView?) {
-        wv?.let {
-            it.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
-            it.loadUrl("javascript:$AUTO_ACTIVATOR_JS_SCRIPT")
-        }
+    fun runDiagnosticThenActivate(wv: WebView?) {
+        wv?.evaluateJavascript(DIAGNOSTIC_AND_ACTIVATE_SCRIPT, null)
     }
 
-    // Coroutine Poller bound to webViewInstance
+    // Coroutine Poller
     LaunchedEffect(webViewInstance, autoScanActive) {
         if (webViewInstance == null || !autoScanActive) return@LaunchedEffect
-        
         while (autoScanActive) {
-            delay(2500)
+            delay(3000)
             webViewInstance?.let { webView ->
                 withContext(Dispatchers.Main) {
                     val currentUrl = webView.url ?: ""
                     Log.d("AmexOfferWebView", "Polling URL: $currentUrl")
-
                     if (currentUrl.contains("dashboard") || currentUrl.contains("account/summary")) {
                         statusText = "Logged in! Redirecting to Amex Offers..."
                         webView.loadUrl(issuer.offersUrl)
-                    } else if (currentUrl.contains("offers") || currentUrl.contains("eligible") || currentUrl.contains("account")) {
-                        isActivating = true
-                        runInjection(webView)
+                    } else if (currentUrl.contains("offers") || currentUrl.contains("eligible")) {
+                        runDiagnosticThenActivate(webView)
                     }
                 }
             }
@@ -87,7 +77,6 @@ fun AmexOfferWebViewScreen(
             color = Slate950
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Top Control Header
                 TopAppBar(
                     title = {
                         Column {
@@ -101,7 +90,7 @@ fun AmexOfferWebViewScreen(
                                 text = statusText,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1
+                                maxLines = 2
                             )
                         }
                     },
@@ -114,25 +103,11 @@ fun AmexOfferWebViewScreen(
                         }
                     },
                     actions = {
-                        // Desktop / Mobile Mode Toggle
-                        IconButton(onClick = {
-                            isDesktopMode = !isDesktopMode
-                            webViewInstance?.let { wv ->
-                                wv.settings.userAgentString = if (isDesktopMode) desktopUserAgent else mobileUserAgent
-                                wv.reload()
-                            }
-                        }) {
-                            Icon(
-                                imageVector = if (isDesktopMode) Icons.Default.DesktopWindows else Icons.Default.PhoneAndroid,
-                                contentDescription = "Toggle Desktop/Mobile Site",
-                                tint = MaterialTheme.colorScheme.secondary
-                            )
-                        }
                         Button(
                             onClick = {
                                 isActivating = true
-                                statusText = "Scanning page for offer buttons..."
-                                runInjection(webViewInstance)
+                                statusText = "Running diagnostic & activation scan..."
+                                runDiagnosticThenActivate(webViewInstance)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -158,7 +133,6 @@ fun AmexOfferWebViewScreen(
                     )
                 }
 
-                // Embedded WebView Container
                 AndroidView(
                     factory = { context ->
                         WebView(context).apply {
@@ -169,9 +143,7 @@ fun AmexOfferWebViewScreen(
                             settings.loadWithOverviewMode = true
                             settings.javaScriptCanOpenWindowsAutomatically = true
                             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            settings.allowFileAccess = true
-                            settings.allowContentAccess = true
-                            settings.userAgentString = if (isDesktopMode) desktopUserAgent else mobileUserAgent
+                            settings.userAgentString = desktopUserAgent
 
                             CookieManager.getInstance().setAcceptCookie(true)
                             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -180,9 +152,6 @@ fun AmexOfferWebViewScreen(
                                 override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                                     val msg = consoleMessage?.message() ?: ""
                                     Log.d("AmexOfferJS", msg)
-                                    if (msg.startsWith("[AmexOfferActivator]")) {
-                                        statusText = msg.removePrefix("[AmexOfferActivator]").trim()
-                                    }
                                     return super.onConsoleMessage(consoleMessage)
                                 }
                             }
@@ -191,14 +160,14 @@ fun AmexOfferWebViewScreen(
                                 AmexOfferBridge(
                                     onStatusUpdate = { msg ->
                                         statusText = msg
-                                        if (msg.contains("Activating") || msg.contains("Scanning") || msg.contains("Attempt") || msg.contains("Found")) {
+                                        if (msg.contains("Found") || msg.contains("Activat") || msg.contains("Scanning")) {
                                             isActivating = true
                                         }
                                     },
                                     onOffersActivated = { count ->
                                         activatedCount = count
                                         isActivating = false
-                                        statusText = "Done! Activated $count offer(s) successfully."
+                                        statusText = "Done! Activated $count offer(s)."
                                     }
                                 ),
                                 "AndroidBridge"
@@ -208,17 +177,15 @@ fun AmexOfferWebViewScreen(
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     super.onPageFinished(view, url)
                                     val currentUrl = url ?: ""
-
                                     if (currentUrl.contains("dashboard") || currentUrl.contains("account/summary")) {
                                         statusText = "Logged in! Navigating to Amex Offers..."
                                         view?.loadUrl(issuer.offersUrl)
                                         return
                                     }
-
                                     if (currentUrl.contains("offers") || currentUrl.contains("eligible")) {
-                                        statusText = "Offers page detected. Launching activator..."
+                                        statusText = "Offers page detected. Running diagnostic..."
                                         isActivating = true
-                                        runInjection(view)
+                                        runDiagnosticThenActivate(view)
                                     }
                                 }
                             }
@@ -235,8 +202,15 @@ fun AmexOfferWebViewScreen(
     }
 }
 
-private const val AUTO_ACTIVATOR_JS_SCRIPT = """
-(function launchOfferActivator() {
+/**
+ * This script first runs a DOM DIAGNOSTIC to discover what elements actually exist
+ * on the Amex offers page, then attempts to click them.
+ *
+ * Phase 1: Diagnostic - report counts and sample HTML of interactive elements near offer cards.
+ * Phase 2: Activate - use discovered selectors to click offer buttons.
+ */
+private const val DIAGNOSTIC_AND_ACTIVATE_SCRIPT = """
+(function() {
     function notify(msg) {
         console.log("[AmexOfferActivator] " + msg);
         if (window.AndroidBridge) {
@@ -244,128 +218,155 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
         }
     }
 
-    function getTargetDocuments() {
-        const docs = [document];
-        for (let i = 0; i < window.frames.length; i++) {
-            try {
-                if (window.frames[i].document) {
-                    docs.push(window.frames[i].document);
-                }
-            } catch (e) {}
+    notify("Phase 1: DOM Diagnostic scanning...");
+
+    // Gather ALL interactive elements on the page
+    var allButtons = document.querySelectorAll('button');
+    var allAnchors = document.querySelectorAll('a');
+    var allRoleButtons = document.querySelectorAll('[role="button"]');
+    var allSvg = document.querySelectorAll('svg');
+    var allClickable = document.querySelectorAll('[onclick], [tabindex="0"]');
+
+    var summary = "Btns:" + allButtons.length + " As:" + allAnchors.length + " RoleBtns:" + allRoleButtons.length + " SVGs:" + allSvg.length + " Clickable:" + allClickable.length;
+    notify("DOM: " + summary);
+
+    // Find all elements that contain offer-related keywords to identify card containers
+    var allEls = document.querySelectorAll('*');
+    var offerCards = [];
+    for (var i = 0; i < allEls.length; i++) {
+        var el = allEls[i];
+        var directText = '';
+        for (var c = 0; c < el.childNodes.length; c++) {
+            if (el.childNodes[c].nodeType === 3) {
+                directText += el.childNodes[c].textContent;
+            }
         }
-        return docs;
+        if (directText.toLowerCase().includes('terms apply')) {
+            offerCards.push(el);
+        }
+    }
+    notify("Found " + offerCards.length + " 'Terms apply' elements (offer cards).");
+
+    // For each offer card, walk up to find the card container, then find interactive children
+    var targetButtons = [];
+    
+    for (var k = 0; k < offerCards.length; k++) {
+        var termsEl = offerCards[k];
+        
+        // Walk up to find a reasonable card container (something with significant height)
+        var container = termsEl;
+        for (var d = 0; d < 10; d++) {
+            if (!container.parentElement) break;
+            container = container.parentElement;
+            if (container.offsetHeight > 100 && container.offsetWidth > 200) break;
+        }
+
+        // Now find ALL interactive elements inside this container
+        var interactives = container.querySelectorAll('button, a, [role="button"], [tabindex="0"], svg');
+        
+        for (var j = 0; j < interactives.length; j++) {
+            var btn = interactives[j];
+            var btnText = (btn.innerText || '').trim().toLowerCase();
+            var btnAria = (btn.getAttribute('aria-label') || '').toLowerCase();
+
+            // Skip known non-action elements
+            if (btnText.includes('view details') || btnText.includes('terms apply') || 
+                btnText.includes('added') || btnText.includes('saved')) continue;
+
+            // Log what we found for diagnostic
+            var info = "Tag:" + btn.tagName + " Text:'" + (btn.innerText || '').trim().substring(0, 30) + "' Aria:'" + (btn.getAttribute('aria-label') || '').substring(0, 40) + "' Class:'" + (btn.className || '').toString().substring(0, 40) + "'";
+            console.log("[AmexOfferActivator] Card " + k + " btn: " + info);
+
+            // Collect this as a potential target
+            if (targetButtons.indexOf(btn) === -1) {
+                targetButtons.push(btn);
+            }
+        }
     }
 
-    function findOfferCardActionButtons() {
-        const docs = getTargetDocuments();
-        const actionButtons = [];
+    notify("Phase 1 done. Found " + targetButtons.length + " candidate interactive elements across " + offerCards.length + " offer cards.");
 
-        docs.forEach(doc => {
-            const allElements = Array.from(doc.querySelectorAll('button, a, div[role="button"], span[role="button"], input[type="button"], svg'));
-
-            allElements.forEach(el => {
-                if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
-
-                const text = (el.innerText || '').trim();
-                const lowerText = text.toLowerCase();
-                const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-                const title = (el.getAttribute('title') || '').toLowerCase();
-                const className = (el.className || '').toString().toLowerCase();
-
-                if (lowerText.includes('view details') || lowerText.includes('terms apply') || 
-                    lowerText.includes('filter') || lowerText.includes('sort') || lowerText.includes('search') ||
-                    lowerText.includes('log out') || lowerText.includes('added to card') || lowerText.includes('activated')) {
-                    return;
-                }
-
-                // Desktop + Mobile text matches
-                const isDirectAdd = lowerText.includes('add to card') || lowerText.includes('activate offer') || lowerText.includes('enroll') || 
-                                    ariaLabel.includes('add to card') || ariaLabel.includes('activate offer') || title.includes('add to card') ||
-                                    lowerText === 'add to card';
-
-                if (isDirectAdd) {
-                    actionButtons.push(el);
-                    return;
-                }
-
-                // Structural match inside offer card
-                let parent = el.parentElement;
-                let isOfferCard = false;
-                let depth = 0;
-
-                while (parent && depth < 8) {
-                    const pText = (parent.innerText || '').toLowerCase();
-                    if (pText.includes('terms apply') || pText.includes('view details') || pText.includes('spend') || pText.includes('earn')) {
-                        isOfferCard = true;
-                        break;
-                    }
-                    parent = parent.parentElement;
-                    depth++;
-                }
-
-                if (isOfferCard) {
-                    const isInteractive = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || 
-                                          el.classList.contains('btn') || className.includes('button') || className.includes('add');
-                    const hasSvg = el.querySelector('svg') !== null || el.tagName.toLowerCase() === 'svg';
-                    const hasPlusIcon = text === '+' || text.includes('+') || ariaLabel.includes('+') || hasSvg;
-
-                    if (isInteractive || hasPlusIcon) {
-                        if (!actionButtons.includes(el) && !actionButtons.includes(el.parentElement)) {
-                            actionButtons.push(el);
-                        }
-                    }
-                }
-            });
-        });
-
-        return actionButtons;
+    // If we found targetButtons, report first few for diagnostic
+    for (var m = 0; m < Math.min(targetButtons.length, 3); m++) {
+        var sample = targetButtons[m];
+        var sampleInfo = "Sample[" + m + "]: Tag=" + sample.tagName + " OuterHTML=" + sample.outerHTML.substring(0, 120);
+        notify(sampleInfo);
     }
 
-    async function executeActivation() {
-        notify("Scanning page & frames for offer buttons...");
+    // Phase 2: Now try to activate. For each offer card, find the action button
+    // Strategy: In each card container, the "add" action is typically the element
+    // that is NOT "View Details" and NOT "Terms apply" - usually the last interactive element or an icon button
+    
+    if (targetButtons.length === 0) {
+        notify("No candidate buttons found. Page may still be loading.");
+        if (window.AndroidBridge) {
+            window.AndroidBridge.onOffersActivated(0);
+        }
+        return;
+    }
 
-        window.scrollBy(0, 400);
-        await new Promise(r => setTimeout(r, 600));
+    // Filter to likely "add" buttons: elements that are small icon buttons or contain SVG/plus
+    var addButtons = [];
+    for (var n = 0; n < targetButtons.length; n++) {
+        var tb = targetButtons[n];
+        var tbText = (tb.innerText || '').trim().toLowerCase();
+        var tbAria = (tb.getAttribute('aria-label') || '').toLowerCase();
+        var tbTag = tb.tagName.toLowerCase();
+        
+        // Direct match
+        if (tbText.includes('add to card') || tbAria.includes('add') || tbText === '+' || tbText === '') {
+            addButtons.push(tb);
+            continue;
+        }
+        
+        // SVG or icon-only buttons (no meaningful text)
+        if (tbTag === 'svg' || (tb.querySelector('svg') && tbText.length < 3)) {
+            addButtons.push(tb);
+            continue;
+        }
 
-        const buttons = findOfferCardActionButtons();
+        // Small buttons that are likely icon buttons
+        if (tb.offsetWidth < 80 && tb.offsetHeight < 80 && tb.offsetWidth > 10) {
+            addButtons.push(tb);
+            continue;
+        }
+    }
 
-        if (buttons.length === 0) {
-            notify("Scan complete: 0 unactivated buttons found on screen.");
+    notify("Phase 2: " + addButtons.length + " likely 'Add' buttons identified. Clicking...");
+
+    var activated = 0;
+    
+    function clickNext(index) {
+        if (index >= addButtons.length) {
+            notify("Finished! Activated " + activated + " offer(s).");
             if (window.AndroidBridge) {
-                window.AndroidBridge.onOffersActivated(0);
+                window.AndroidBridge.onOffersActivated(activated);
             }
             return;
         }
-
-        notify("Found " + buttons.length + " offer button(s). Activating...");
-        let count = 0;
-
-        for (let i = 0; i < buttons.length; i++) {
-            try {
-                const btn = buttons[i];
-                btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                
-                btn.focus();
-                btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-                btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
-                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-                btn.click();
-
-                count++;
-                notify("Activated " + count + " of " + buttons.length + " offers...");
-                await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
-            } catch (err) {
-                console.error("Click error:", err);
-            }
+        
+        var btn = addButtons[index];
+        try {
+            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            // Full synthetic event chain
+            btn.focus();
+            btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+            btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+            btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            
+            activated++;
+            notify("Clicked " + activated + "/" + addButtons.length + "...");
+        } catch (err) {
+            console.error("Click error: " + err);
         }
-
-        notify("Finished! Activated " + count + " offer(s) successfully.");
-        if (window.AndroidBridge) {
-            window.AndroidBridge.onOffersActivated(count);
-        }
+        
+        setTimeout(function() { clickNext(index + 1); }, 1200);
     }
 
-    executeActivation();
+    // Start clicking after a brief delay
+    setTimeout(function() { clickNext(0); }, 500);
 })();
 """
