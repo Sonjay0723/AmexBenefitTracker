@@ -11,7 +11,9 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,6 +43,10 @@ fun AmexOfferWebViewScreen(
     var activatedCount by remember { mutableStateOf(0) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var autoScanActive by remember { mutableStateOf(true) }
+    var isDesktopMode by remember { mutableStateOf(true) } // Default to Desktop site mode for cleaner DOM buttons
+
+    val desktopUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    val mobileUserAgent = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Mobile Safari/537.36"
 
     fun runInjection(wv: WebView?) {
         wv?.let {
@@ -54,7 +60,7 @@ fun AmexOfferWebViewScreen(
         if (webViewInstance == null || !autoScanActive) return@LaunchedEffect
         
         while (autoScanActive) {
-            delay(2000)
+            delay(2500)
             webViewInstance?.let { webView ->
                 withContext(Dispatchers.Main) {
                     val currentUrl = webView.url ?: ""
@@ -108,6 +114,20 @@ fun AmexOfferWebViewScreen(
                         }
                     },
                     actions = {
+                        // Desktop / Mobile Mode Toggle
+                        IconButton(onClick = {
+                            isDesktopMode = !isDesktopMode
+                            webViewInstance?.let { wv ->
+                                wv.settings.userAgentString = if (isDesktopMode) desktopUserAgent else mobileUserAgent
+                                wv.reload()
+                            }
+                        }) {
+                            Icon(
+                                imageVector = if (isDesktopMode) Icons.Default.DesktopWindows else Icons.Default.PhoneAndroid,
+                                contentDescription = "Toggle Desktop/Mobile Site",
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
+                        }
                         Button(
                             onClick = {
                                 isActivating = true
@@ -149,8 +169,9 @@ fun AmexOfferWebViewScreen(
                             settings.loadWithOverviewMode = true
                             settings.javaScriptCanOpenWindowsAutomatically = true
                             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            settings.userAgentString =
-                                "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Mobile Safari/537.36"
+                            settings.allowFileAccess = true
+                            settings.allowContentAccess = true
+                            settings.userAgentString = if (isDesktopMode) desktopUserAgent else mobileUserAgent
 
                             CookieManager.getInstance().setAcceptCookie(true)
                             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -223,67 +244,85 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
         }
     }
 
+    function getTargetDocuments() {
+        const docs = [document];
+        for (let i = 0; i < window.frames.length; i++) {
+            try {
+                if (window.frames[i].document) {
+                    docs.push(window.frames[i].document);
+                }
+            } catch (e) {}
+        }
+        return docs;
+    }
+
     function findOfferCardActionButtons() {
-        const allElements = Array.from(document.querySelectorAll('*'));
+        const docs = getTargetDocuments();
         const actionButtons = [];
 
-        allElements.forEach(el => {
-            if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+        docs.forEach(doc => {
+            const allElements = Array.from(doc.querySelectorAll('button, a, div[role="button"], span[role="button"], input[type="button"], svg'));
 
-            const text = (el.innerText || '').trim();
-            const lowerText = text.toLowerCase();
-            const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-            const title = (el.getAttribute('title') || '').toLowerCase();
-            const className = (el.className || '').toString().toLowerCase();
+            allElements.forEach(el => {
+                if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
 
-            // Ignore navigation, details, and terms links
-            if (lowerText.includes('view details') || lowerText.includes('terms apply') || 
-                lowerText.includes('filter') || lowerText.includes('sort') || lowerText.includes('search') ||
-                lowerText.includes('log out') || lowerText.includes('added to card') || lowerText.includes('activated')) {
-                return;
-            }
+                const text = (el.innerText || '').trim();
+                const lowerText = text.toLowerCase();
+                const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
+                const title = (el.getAttribute('title') || '').toLowerCase();
+                const className = (el.className || '').toString().toLowerCase();
 
-            // 1. Direct Text / Aria Match
-            if (lowerText.includes('add to card') || lowerText.includes('activate offer') || lowerText.includes('enroll') || 
-                ariaLabel.includes('add to card') || ariaLabel.includes('activate offer') || title.includes('add to card')) {
-                actionButtons.push(el);
-                return;
-            }
-
-            // 2. Structural Match inside Offer Card Container
-            let parent = el.parentElement;
-            let isOfferCard = false;
-            let depth = 0;
-
-            while (parent && depth < 8) {
-                const pText = (parent.innerText || '').toLowerCase();
-                if (pText.includes('terms apply') || pText.includes('view details') || pText.includes('spend') || pText.includes('earn')) {
-                    isOfferCard = true;
-                    break;
+                if (lowerText.includes('view details') || lowerText.includes('terms apply') || 
+                    lowerText.includes('filter') || lowerText.includes('sort') || lowerText.includes('search') ||
+                    lowerText.includes('log out') || lowerText.includes('added to card') || lowerText.includes('activated')) {
+                    return;
                 }
-                parent = parent.parentElement;
-                depth++;
-            }
 
-            if (isOfferCard) {
-                const isInteractive = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || 
-                                      el.classList.contains('btn') || className.includes('button') || className.includes('add');
-                const hasSvg = el.querySelector('svg') !== null || el.tagName.toLowerCase() === 'svg';
-                const hasPlusIcon = text === '+' || text.includes('+') || ariaLabel.includes('+') || hasSvg;
+                // Desktop + Mobile text matches
+                const isDirectAdd = lowerText.includes('add to card') || lowerText.includes('activate offer') || lowerText.includes('enroll') || 
+                                    ariaLabel.includes('add to card') || ariaLabel.includes('activate offer') || title.includes('add to card') ||
+                                    lowerText === 'add to card';
 
-                if (isInteractive || hasPlusIcon) {
-                    if (!actionButtons.includes(el) && !actionButtons.includes(el.parentElement)) {
-                        actionButtons.push(el);
+                if (isDirectAdd) {
+                    actionButtons.push(el);
+                    return;
+                }
+
+                // Structural match inside offer card
+                let parent = el.parentElement;
+                let isOfferCard = false;
+                let depth = 0;
+
+                while (parent && depth < 8) {
+                    const pText = (parent.innerText || '').toLowerCase();
+                    if (pText.includes('terms apply') || pText.includes('view details') || pText.includes('spend') || pText.includes('earn')) {
+                        isOfferCard = true;
+                        break;
+                    }
+                    parent = parent.parentElement;
+                    depth++;
+                }
+
+                if (isOfferCard) {
+                    const isInteractive = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || 
+                                          el.classList.contains('btn') || className.includes('button') || className.includes('add');
+                    const hasSvg = el.querySelector('svg') !== null || el.tagName.toLowerCase() === 'svg';
+                    const hasPlusIcon = text === '+' || text.includes('+') || ariaLabel.includes('+') || hasSvg;
+
+                    if (isInteractive || hasPlusIcon) {
+                        if (!actionButtons.includes(el) && !actionButtons.includes(el.parentElement)) {
+                            actionButtons.push(el);
+                        }
                     }
                 }
-            }
+            });
         });
 
         return actionButtons;
     }
 
     async function executeActivation() {
-        notify("Scanning page for offer buttons...");
+        notify("Scanning page & frames for offer buttons...");
 
         window.scrollBy(0, 400);
         await new Promise(r => setTimeout(r, 600));
@@ -291,14 +330,14 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
         const buttons = findOfferCardActionButtons();
 
         if (buttons.length === 0) {
-            notify("No unactivated offer buttons found on screen.");
+            notify("Scan complete: 0 unactivated buttons found on screen.");
             if (window.AndroidBridge) {
                 window.AndroidBridge.onOffersActivated(0);
             }
             return;
         }
 
-        notify("Found " + buttons.length + " offer button(s). Activating now...");
+        notify("Found " + buttons.length + " offer button(s). Activating...");
         let count = 0;
 
         for (let i = 0; i < buttons.length; i++) {
@@ -306,7 +345,6 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
                 const btn = buttons[i];
                 btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 
-                // Dispatch full touch and click event suite for React SPA compatibility
                 btn.focus();
                 btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
                 btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
