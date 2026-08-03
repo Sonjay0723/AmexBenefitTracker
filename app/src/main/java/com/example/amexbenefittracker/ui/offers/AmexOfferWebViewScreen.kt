@@ -2,13 +2,13 @@ package com.example.amexbenefittracker.ui.offers
 
 import android.annotation.SuppressLint
 import android.webkit.CookieManager
-import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,7 +31,7 @@ fun AmexOfferWebViewScreen(
     issuer: CardIssuer,
     onDismiss: () -> Unit
 ) {
-    var statusText by remember { mutableStateOf("Please sign into ${issuer.displayName} to activate offers...") }
+    var statusText by remember { mutableStateOf("Sign into ${issuer.displayName} then tap 'Activate Offers Now'...") }
     var isActivating by remember { mutableStateOf(false) }
     var activatedCount by remember { mutableStateOf(0) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
@@ -69,6 +69,20 @@ fun AmexOfferWebViewScreen(
                         }
                     },
                     actions = {
+                        Button(
+                            onClick = {
+                                isActivating = true
+                                statusText = "Scanning page for offers..."
+                                webViewInstance?.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Activate Offers Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
                         IconButton(onClick = {
                             webViewInstance?.reload()
                         }) {
@@ -85,7 +99,7 @@ fun AmexOfferWebViewScreen(
                     )
                 }
 
-                // WebView Container
+                // Embedded WebView Container
                 AndroidView(
                     factory = { context ->
                         WebView(context).apply {
@@ -104,14 +118,14 @@ fun AmexOfferWebViewScreen(
                                 AmexOfferBridge(
                                     onStatusUpdate = { msg ->
                                         statusText = msg
-                                        if (msg.contains("Activating") || msg.contains("Scanning")) {
+                                        if (msg.contains("Activating") || msg.contains("Scanning") || msg.contains("Attempt")) {
                                             isActivating = true
                                         }
                                     },
                                     onOffersActivated = { count ->
                                         activatedCount = count
                                         isActivating = false
-                                        statusText = "Completed! Activated $count offers successfully."
+                                        statusText = "Done! Activated $count offer(s) successfully."
                                     }
                                 ),
                                 "AndroidBridge"
@@ -120,8 +134,18 @@ fun AmexOfferWebViewScreen(
                             webViewClient = object : WebViewClient() {
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     super.onPageFinished(view, url)
-                                    if (url?.contains("offers") == true || url?.contains("eligible") == true) {
-                                        statusText = "Offers page loaded. Launching auto-activation script..."
+                                    val currentUrl = url ?: ""
+
+                                    // If user was redirected to Dashboard after login, redirect them directly to Offers tab
+                                    if (currentUrl.contains("dashboard") || currentUrl.contains("account/summary")) {
+                                        statusText = "Logged in! Navigating to Amex Offers..."
+                                        view?.loadUrl(issuer.offersUrl)
+                                        return
+                                    }
+
+                                    // Auto-trigger when landing on offers page
+                                    if (currentUrl.contains("offers") || currentUrl.contains("eligible")) {
+                                        statusText = "Offers page loaded. Launching auto-activator..."
                                         isActivating = true
                                         view?.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
                                     }
@@ -141,61 +165,71 @@ fun AmexOfferWebViewScreen(
 }
 
 private const val AUTO_ACTIVATOR_JS_SCRIPT = """
-(function activateAllOffers() {
-    if (window.isActivatingOffersRunning) return;
+(function launchOfferActivator() {
     window.isActivatingOffersRunning = true;
 
     function notify(msg) {
-        console.log("[OfferActivator] " + msg);
+        console.log("[AmexOfferActivator] " + msg);
         if (window.AndroidBridge) {
             window.AndroidBridge.updateStatus(msg);
         }
     }
 
-    notify("Scanning page for eligible offers...");
-
-    let totalActivated = 0;
-
     function getEligibleButtons() {
-        return Array.from(document.querySelectorAll('button')).filter(btn => {
-            const txt = (btn.innerText || btn.getAttribute('aria-label') || '').toLowerCase();
-            return txt.includes('add to card') || txt.includes('activate offer');
+        const candidates = Array.from(document.querySelectorAll('button, a, div[role="button"], span[role="button"]'));
+        return candidates.filter(el => {
+            const label = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('title') || '').toLowerCase().trim();
+            const isAdd = label.includes('add to card') || label.includes('activate offer') || label.includes('enroll in offer') || label === 'add to card';
+            const isAlreadyAdded = label.includes('added to card') || label.includes('activated') || label.includes('enrolled');
+            return isAdd && !isAlreadyAdded;
         });
     }
 
-    async function processLoop() {
+    let attempts = 0;
+    const maxAttempts = 15;
+    let totalActivated = 0;
+
+    async function scanAndProcess() {
+        attempts++;
+        notify("Attempt " + attempts + "/" + maxAttempts + ": Scanning DOM for 'Add to Card' buttons...");
+        
+        // Scroll down slightly to trigger lazy-loaded cards
+        window.scrollBy(0, 350);
+
         const buttons = getEligibleButtons();
-        if (buttons.length === 0) {
-            notify("No unactivated offers found on this page.");
-            if (window.AndroidBridge) {
-                window.AndroidBridge.onComplete(0);
+
+        if (buttons.length > 0) {
+            notify("Found " + buttons.length + " eligible offer(s). Activating now...");
+            for (let i = 0; i < buttons.length; i++) {
+                try {
+                    const btn = buttons[i];
+                    btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    btn.click();
+                    totalActivated++;
+                    notify("Activated " + totalActivated + " of " + buttons.length + " offers...");
+                    await new Promise(r => setTimeout(r, 900 + Math.random() * 600));
+                } catch (e) {
+                    console.error("Click error:", e);
+                }
             }
-            window.isActivatingOffersRunning = false;
+            notify("Finished activating " + totalActivated + " offer(s)!");
+            if (window.AndroidBridge) {
+                window.AndroidBridge.onComplete(totalActivated);
+            }
             return;
         }
 
-        notify("Found " + buttons.length + " offer(s). Activating now...");
-
-        for (let i = 0; i < buttons.length; i++) {
-            try {
-                const btn = buttons[i];
-                btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                btn.click();
-                totalActivated++;
-                notify("Activated offer (" + totalActivated + " of " + buttons.length + ")...");
-                await new Promise(r => setTimeout(r, 900 + Math.random() * 600));
-            } catch (err) {
-                console.error(err);
+        if (attempts < maxAttempts) {
+            notify("Attempt " + attempts + "/" + maxAttempts + ": Waiting for offer cards to render...");
+            setTimeout(scanAndProcess, 1500);
+        } else {
+            notify("No unactivated offers detected. Make sure you are on the 'Amex Offers' tab.");
+            if (window.AndroidBridge) {
+                window.AndroidBridge.onComplete(0);
             }
         }
-
-        notify("Finished activating " + totalActivated + " offer(s)!");
-        if (window.AndroidBridge) {
-            window.AndroidBridge.onComplete(totalActivated);
-        }
-        window.isActivatingOffersRunning = false;
     }
 
-    setTimeout(processLoop, 2500);
+    scanAndProcess();
 })();
 """
