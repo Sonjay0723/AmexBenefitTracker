@@ -58,9 +58,13 @@ import com.example.amexbenefittracker.domain.model.CardSummary
 import com.example.amexbenefittracker.ui.auth.AuthViewModel
 import com.example.amexbenefittracker.ui.theme.*
 import java.util.*
+import androidx.compose.material.icons.filled.FlashOn
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import com.example.amexbenefittracker.ui.offers.CardIssuer
+import com.example.amexbenefittracker.ui.offers.IssuerSelectionDialog
+import com.example.amexbenefittracker.ui.offers.AmexOfferWebViewScreen
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
@@ -141,6 +145,26 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
             viewModel = viewModel,
             plaidLauncher = plaidLauncher,
             onDismiss = { showPlaidSettingsDialog = false }
+        )
+    }
+
+    var showIssuerDialog by remember { mutableStateOf(false) }
+    var activeOfferIssuer by remember { mutableStateOf<CardIssuer?>(null) }
+
+    if (showIssuerDialog) {
+        IssuerSelectionDialog(
+            onDismissRequest = { showIssuerDialog = false },
+            onIssuerSelected = { issuer ->
+                showIssuerDialog = false
+                activeOfferIssuer = issuer
+            }
+        )
+    }
+
+    activeOfferIssuer?.let { issuer ->
+        AmexOfferWebViewScreen(
+            issuer = issuer,
+            onDismiss = { activeOfferIssuer = null }
         )
     }
 
@@ -267,6 +291,10 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                                             viewModel.toggleCorporateCredit()
                                         }
                                         EffectiveFeeSection(summary, accentTextColor)
+                                        QuickActionsSection(
+                                            onAutoActivateOffersClick = { showIssuerDialog = true },
+                                            accentTextColor = accentTextColor
+                                        )
                                         RecentCreditsSection(
                                             transactions = transactions,
                                             isRefreshing = isRefreshing,
@@ -922,6 +950,65 @@ fun EditableYearSubheader(trackingYear: String) {
             modifier = Modifier.padding(vertical = 4.dp)
         )
         Text(" Refreshed Benefits", style = MaterialTheme.typography.bodySmall, color = Slate500)
+    }
+}
+
+@Composable
+fun QuickActionsSection(
+    onAutoActivateOffersClick: () -> Unit,
+    accentTextColor: Color
+) {
+    Surface(
+        color = Slate900.copy(alpha = 0.4f),
+        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, Slate800, RoundedCornerShape(24.dp))
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Text(
+                text = "Quick Actions",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Automate card offer activations and benefit sync",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = onAutoActivateOffersClick,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FlashOn,
+                        contentDescription = "Auto-Activate Offers",
+                        tint = accentTextColor
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Auto-Activate Card Offers",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
     }
 }
 
