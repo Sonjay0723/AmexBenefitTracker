@@ -203,11 +203,19 @@ fun AmexOfferWebViewScreen(
 }
 
 /**
- * This script first runs a DOM DIAGNOSTIC to discover what elements actually exist
- * on the Amex offers page, then attempts to click them.
+ * Three-phase offer activation script:
  *
- * Phase 1: Diagnostic - report counts and sample HTML of interactive elements near offer cards.
- * Phase 2: Activate - use discovered selectors to click offer buttons.
+ * Phase 0: Navigation - Check if we're on the "Added to Card" view and navigate
+ *          to the "Eligible" offers section by clicking the appropriate tab/link.
+ * Phase 1: Diagnostic - Scan the DOM to discover the actual HTML structure of
+ *          interactive elements within offer cards.
+ * Phase 2: Activate - Click all discovered "Add to Card" buttons.
+ *
+ * The Amex offers page has two views:
+ *   - "Added to Card" (already activated - no action needed)
+ *   - "Eligible" (available offers with "Add to Card" / "+" buttons)
+ * After login, the page often defaults to showing "Added to Card",
+ * so Phase 0 ensures we switch to the "Eligible" view first.
  */
 private const val DIAGNOSTIC_AND_ACTIVATE_SCRIPT = """
 (function() {
@@ -218,155 +226,228 @@ private const val DIAGNOSTIC_AND_ACTIVATE_SCRIPT = """
         }
     }
 
-    notify("Phase 1: DOM Diagnostic scanning...");
+    // ============================================================
+    // PHASE 0: NAVIGATE TO ELIGIBLE OFFERS
+    // ============================================================
+    notify("Phase 0: Checking page state...");
 
-    // Gather ALL interactive elements on the page
-    var allButtons = document.querySelectorAll('button');
-    var allAnchors = document.querySelectorAll('a');
-    var allRoleButtons = document.querySelectorAll('[role="button"]');
-    var allSvg = document.querySelectorAll('svg');
-    var allClickable = document.querySelectorAll('[onclick], [tabindex="0"]');
+    // Dump entire page text for diagnostic (first 500 chars)
+    var bodyText = (document.body ? document.body.innerText : '').substring(0, 500);
+    console.log("[AmexOfferActivator] Page text: " + bodyText);
 
-    var summary = "Btns:" + allButtons.length + " As:" + allAnchors.length + " RoleBtns:" + allRoleButtons.length + " SVGs:" + allSvg.length + " Clickable:" + allClickable.length;
-    notify("DOM: " + summary);
+    // Check if we are seeing "Added to Card" view instead of "Eligible" view
+    var pageText = document.body ? document.body.innerText.toLowerCase() : '';
+    var onAddedView = pageText.includes('added to card') && !pageText.includes('add to card');
 
-    // Find all elements that contain offer-related keywords to identify card containers
-    var allEls = document.querySelectorAll('*');
-    var offerCards = [];
-    for (var i = 0; i < allEls.length; i++) {
-        var el = allEls[i];
-        var directText = '';
-        for (var c = 0; c < el.childNodes.length; c++) {
-            if (el.childNodes[c].nodeType === 3) {
-                directText += el.childNodes[c].textContent;
+    if (onAddedView) {
+        notify("On 'Added to Card' view. Looking for 'Eligible' tab...");
+
+        // Strategy 1: Look for links/buttons/tabs containing "Eligible" text
+        var allLinks = document.querySelectorAll('a, button, [role="tab"], [role="button"], span, div');
+        var eligibleLink = null;
+        for (var i = 0; i < allLinks.length; i++) {
+            var linkText = (allLinks[i].innerText || '').trim().toLowerCase();
+            var linkHref = (allLinks[i].getAttribute('href') || '').toLowerCase();
+            if (linkText === 'eligible' || linkText.includes('eligible offers') ||
+                linkHref.includes('eligible')) {
+                eligibleLink = allLinks[i];
+                console.log("[AmexOfferActivator] Found eligible link: Tag=" + allLinks[i].tagName + " Text='" + linkText + "' Href='" + linkHref + "'");
+                break;
             }
         }
-        if (directText.toLowerCase().includes('terms apply')) {
-            offerCards.push(el);
-        }
-    }
-    notify("Found " + offerCards.length + " 'Terms apply' elements (offer cards).");
 
-    // For each offer card, walk up to find the card container, then find interactive children
-    var targetButtons = [];
-    
-    for (var k = 0; k < offerCards.length; k++) {
-        var termsEl = offerCards[k];
-        
-        // Walk up to find a reasonable card container (something with significant height)
-        var container = termsEl;
-        for (var d = 0; d < 10; d++) {
-            if (!container.parentElement) break;
-            container = container.parentElement;
-            if (container.offsetHeight > 100 && container.offsetWidth > 200) break;
+        if (eligibleLink) {
+            notify("Clicking 'Eligible' tab...");
+            eligibleLink.click();
+            eligibleLink.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            // Wait for page to re-render, then re-run
+            setTimeout(function() {
+                notify("Re-scanning after Eligible tab click...");
+                runScanAndActivate();
+            }, 3000);
+            return;
         }
 
-        // Now find ALL interactive elements inside this container
-        var interactives = container.querySelectorAll('button, a, [role="button"], [tabindex="0"], svg');
-        
-        for (var j = 0; j < interactives.length; j++) {
-            var btn = interactives[j];
-            var btnText = (btn.innerText || '').trim().toLowerCase();
-            var btnAria = (btn.getAttribute('aria-label') || '').toLowerCase();
-
-            // Skip known non-action elements
-            if (btnText.includes('view details') || btnText.includes('terms apply') || 
-                btnText.includes('added') || btnText.includes('saved')) continue;
-
-            // Log what we found for diagnostic
-            var info = "Tag:" + btn.tagName + " Text:'" + (btn.innerText || '').trim().substring(0, 30) + "' Aria:'" + (btn.getAttribute('aria-label') || '').substring(0, 40) + "' Class:'" + (btn.className || '').toString().substring(0, 40) + "'";
-            console.log("[AmexOfferActivator] Card " + k + " btn: " + info);
-
-            // Collect this as a potential target
-            if (targetButtons.indexOf(btn) === -1) {
-                targetButtons.push(btn);
+        // Strategy 2: Look for the "Select" dropdown and try to find "Eligible" option
+        var selectDropdowns = document.querySelectorAll('select');
+        for (var s = 0; s < selectDropdowns.length; s++) {
+            var options = selectDropdowns[s].querySelectorAll('option');
+            for (var o = 0; o < options.length; o++) {
+                if ((options[o].textContent || '').toLowerCase().includes('eligible')) {
+                    notify("Found 'Eligible' in select dropdown, switching...");
+                    selectDropdowns[s].value = options[o].value;
+                    selectDropdowns[s].dispatchEvent(new Event('change', { bubbles: true }));
+                    setTimeout(function() {
+                        notify("Re-scanning after dropdown change...");
+                        runScanAndActivate();
+                    }, 3000);
+                    return;
+                }
             }
         }
-    }
 
-    notify("Phase 1 done. Found " + targetButtons.length + " candidate interactive elements across " + offerCards.length + " offer cards.");
-
-    // If we found targetButtons, report first few for diagnostic
-    for (var m = 0; m < Math.min(targetButtons.length, 3); m++) {
-        var sample = targetButtons[m];
-        var sampleInfo = "Sample[" + m + "]: Tag=" + sample.tagName + " OuterHTML=" + sample.outerHTML.substring(0, 120);
-        notify(sampleInfo);
-    }
-
-    // Phase 2: Now try to activate. For each offer card, find the action button
-    // Strategy: In each card container, the "add" action is typically the element
-    // that is NOT "View Details" and NOT "Terms apply" - usually the last interactive element or an icon button
-    
-    if (targetButtons.length === 0) {
-        notify("No candidate buttons found. Page may still be loading.");
-        if (window.AndroidBridge) {
-            window.AndroidBridge.onOffersActivated(0);
-        }
+        // Strategy 3: Direct URL navigation to eligible offers
+        notify("No 'Eligible' tab found. Navigating directly to eligible URL...");
+        window.location.href = 'https://global.americanexpress.com/offers/eligible';
         return;
     }
 
-    // Filter to likely "add" buttons: elements that are small icon buttons or contain SVG/plus
-    var addButtons = [];
-    for (var n = 0; n < targetButtons.length; n++) {
-        var tb = targetButtons[n];
-        var tbText = (tb.innerText || '').trim().toLowerCase();
-        var tbAria = (tb.getAttribute('aria-label') || '').toLowerCase();
-        var tbTag = tb.tagName.toLowerCase();
-        
-        // Direct match
-        if (tbText.includes('add to card') || tbAria.includes('add') || tbText === '+' || tbText === '') {
-            addButtons.push(tb);
-            continue;
+    // If we're already on the right page, run scan
+    runScanAndActivate();
+
+    function runScanAndActivate() {
+        // ============================================================
+        // PHASE 1: DOM DIAGNOSTIC
+        // ============================================================
+        notify("Phase 1: Scanning DOM...");
+
+        var allButtons = document.querySelectorAll('button');
+        var allAnchors = document.querySelectorAll('a');
+        var allRoleButtons = document.querySelectorAll('[role="button"]');
+        var allSvg = document.querySelectorAll('svg');
+
+        var summary = "Btns:" + allButtons.length + " As:" + allAnchors.length + " RoleBtns:" + allRoleButtons.length + " SVGs:" + allSvg.length;
+        notify("DOM: " + summary);
+
+        // Strategy A: Search for "Add to Card" text in any element
+        var addToCardButtons = [];
+        var allEls = document.querySelectorAll('button, a, [role="button"], span, div');
+        for (var i = 0; i < allEls.length; i++) {
+            var el = allEls[i];
+            var elText = (el.innerText || '').trim().toLowerCase();
+            var elAria = (el.getAttribute('aria-label') || '').toLowerCase();
+            if (elText === 'add to card' || elAria.includes('add to card') || elAria.includes('add offer')) {
+                addToCardButtons.push(el);
+                console.log("[AmexOfferActivator] AddToCard match: Tag=" + el.tagName + " Text='" + elText + "' Aria='" + elAria.substring(0, 50) + "'");
+            }
         }
-        
-        // SVG or icon-only buttons (no meaningful text)
-        if (tbTag === 'svg' || (tb.querySelector('svg') && tbText.length < 3)) {
-            addButtons.push(tb);
-            continue;
+        notify("Found " + addToCardButtons.length + " 'Add to Card' text matches.");
+
+        // Strategy B: Find "Terms apply" elements (eligible offer marker) and look for nearby action buttons
+        var termsApplyEls = [];
+        var allElements = document.querySelectorAll('*');
+        for (var t = 0; t < allElements.length; t++) {
+            var te = allElements[t];
+            var directText = '';
+            for (var c = 0; c < te.childNodes.length; c++) {
+                if (te.childNodes[c].nodeType === 3) {
+                    directText += te.childNodes[c].textContent;
+                }
+            }
+            if (directText.toLowerCase().includes('terms apply')) {
+                termsApplyEls.push(te);
+            }
+        }
+        notify("Found " + termsApplyEls.length + " 'Terms apply' markers.");
+
+        // For each offer card, find the card container and all interactive elements inside
+        var cardButtons = [];
+        for (var k = 0; k < termsApplyEls.length; k++) {
+            var termsEl = termsApplyEls[k];
+            var container = termsEl;
+            for (var d = 0; d < 12; d++) {
+                if (!container.parentElement) break;
+                container = container.parentElement;
+                if (container.offsetHeight > 80 && container.offsetWidth > 150) break;
+            }
+
+            var interactives = container.querySelectorAll('button, a, [role="button"], [tabindex="0"]');
+            for (var j = 0; j < interactives.length; j++) {
+                var btn = interactives[j];
+                var btnText = (btn.innerText || '').trim().toLowerCase();
+                // Skip non-action elements
+                if (btnText.includes('view details') || btnText.includes('terms apply') ||
+                    btnText.includes('added') || btnText.includes('saved to card') ||
+                    btnText.includes('log out')) continue;
+                if (cardButtons.indexOf(btn) === -1) {
+                    cardButtons.push(btn);
+                    console.log("[AmexOfferActivator] Card" + k + " btn: Tag=" + btn.tagName + " Text='" + btnText.substring(0, 30) + "' Aria='" + (btn.getAttribute('aria-label') || '').substring(0, 40) + "' Size=" + btn.offsetWidth + "x" + btn.offsetHeight);
+                }
+            }
+        }
+        notify("Found " + cardButtons.length + " interactive elements in offer cards.");
+
+        // Strategy C: Find SVGs inside buttons (icon-only add buttons with "+" icons)
+        var svgButtons = [];
+        for (var sb = 0; sb < allButtons.length; sb++) {
+            var b = allButtons[sb];
+            if (b.querySelector('svg') && (b.innerText || '').trim().length < 3) {
+                var bAria = (b.getAttribute('aria-label') || '').toLowerCase();
+                if (!bAria.includes('close') && !bAria.includes('menu') && !bAria.includes('search') &&
+                    !bAria.includes('back') && !bAria.includes('navigate') && !bAria.includes('chat')) {
+                    svgButtons.push(b);
+                    console.log("[AmexOfferActivator] SVG btn: Aria='" + bAria.substring(0, 40) + "' Size=" + b.offsetWidth + "x" + b.offsetHeight);
+                }
+            }
+        }
+        notify("Found " + svgButtons.length + " icon-only (SVG) buttons.");
+
+        // Combine all found buttons, deduplicated
+        var allFoundButtons = [];
+        function addUnique(arr) {
+            for (var x = 0; x < arr.length; x++) {
+                if (allFoundButtons.indexOf(arr[x]) === -1) {
+                    allFoundButtons.push(arr[x]);
+                }
+            }
+        }
+        addUnique(addToCardButtons);
+        addUnique(cardButtons);
+        addUnique(svgButtons);
+
+        notify("Total unique targets: " + allFoundButtons.length);
+
+        // Show samples
+        for (var m = 0; m < Math.min(allFoundButtons.length, 3); m++) {
+            var sample = allFoundButtons[m];
+            notify("Sample[" + m + "]: " + sample.tagName + " '" + (sample.innerText || '').trim().substring(0, 25) + "' html=" + sample.outerHTML.substring(0, 100));
         }
 
-        // Small buttons that are likely icon buttons
-        if (tb.offsetWidth < 80 && tb.offsetHeight < 80 && tb.offsetWidth > 10) {
-            addButtons.push(tb);
-            continue;
-        }
-    }
-
-    notify("Phase 2: " + addButtons.length + " likely 'Add' buttons identified. Clicking...");
-
-    var activated = 0;
-    
-    function clickNext(index) {
-        if (index >= addButtons.length) {
-            notify("Finished! Activated " + activated + " offer(s).");
+        // ============================================================
+        // PHASE 2: ACTIVATE
+        // ============================================================
+        if (allFoundButtons.length === 0) {
+            notify("No offer buttons found. The page may still be loading or all offers are already activated.");
             if (window.AndroidBridge) {
-                window.AndroidBridge.onOffersActivated(activated);
+                window.AndroidBridge.onOffersActivated(0);
             }
             return;
         }
-        
-        var btn = addButtons[index];
-        try {
-            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            
-            // Full synthetic event chain
-            btn.focus();
-            btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
-            btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-            btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
-            btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-            
-            activated++;
-            notify("Clicked " + activated + "/" + addButtons.length + "...");
-        } catch (err) {
-            console.error("Click error: " + err);
-        }
-        
-        setTimeout(function() { clickNext(index + 1); }, 1200);
-    }
 
-    // Start clicking after a brief delay
-    setTimeout(function() { clickNext(0); }, 500);
+        notify("Phase 2: Activating " + allFoundButtons.length + " offers...");
+        var activated = 0;
+
+        function clickNext(index) {
+            if (index >= allFoundButtons.length) {
+                notify("Done! Activated " + activated + " offer(s).");
+                if (window.AndroidBridge) {
+                    window.AndroidBridge.onOffersActivated(activated);
+                }
+                return;
+            }
+
+            var btn = allFoundButtons[index];
+            try {
+                btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                // Full synthetic event chain for React SPAs
+                btn.focus();
+                btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+                activated++;
+                notify("Clicked " + activated + "/" + allFoundButtons.length + ": " + (btn.innerText || '').trim().substring(0, 20));
+            } catch (err) {
+                console.error("[AmexOfferActivator] Click error on #" + index + ": " + err);
+            }
+
+            setTimeout(function() { clickNext(index + 1); }, 1500);
+        }
+
+        setTimeout(function() { clickNext(0); }, 800);
+    }
 })();
 """
