@@ -1,7 +1,10 @@
 package com.example.amexbenefittracker.ui.offers
 
 import android.annotation.SuppressLint
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.*
@@ -21,6 +24,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.amexbenefittracker.ui.theme.Slate900
 import com.example.amexbenefittracker.ui.theme.Slate950
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
@@ -29,10 +33,31 @@ fun AmexOfferWebViewScreen(
     issuer: CardIssuer,
     onDismiss: () -> Unit
 ) {
-    var statusText by remember { mutableStateOf("Sign in, then tap 'Activate Offers Now'...") }
+    var statusText by remember { mutableStateOf("Sign into Amex, then activation will start automatically...") }
     var isActivating by remember { mutableStateOf(false) }
     var activatedCount by remember { mutableStateOf(0) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var autoScanActive by remember { mutableStateOf(true) }
+
+    // Continuous 2-second URL & DOM Poller Loop in Kotlin
+    // Solves Single Page Application (React SPA) route changes where onPageFinished does not re-trigger!
+    LaunchedEffect(autoScanActive) {
+        while (autoScanActive) {
+            delay(2000)
+            webViewInstance?.let { webView ->
+                val currentUrl = webView.url ?: ""
+                Log.d("AmexOfferWebView", "Polling URL: $currentUrl")
+
+                if (currentUrl.contains("dashboard") || currentUrl.contains("account/summary")) {
+                    statusText = "Logged in! Redirecting to Amex Offers..."
+                    webView.loadUrl(issuer.offersUrl)
+                } else if (currentUrl.contains("offers") || currentUrl.contains("eligible")) {
+                    isActivating = true
+                    webView.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
+                }
+            }
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -62,7 +87,10 @@ fun AmexOfferWebViewScreen(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = onDismiss) {
+                        IconButton(onClick = {
+                            autoScanActive = false
+                            onDismiss()
+                        }) {
                             Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                         }
                     },
@@ -106,11 +134,24 @@ fun AmexOfferWebViewScreen(
                             settings.domStorageEnabled = true
                             settings.useWideViewPort = true
                             settings.loadWithOverviewMode = true
+                            settings.javaScriptCanOpenWindowsAutomatically = true
                             settings.userAgentString =
                                 "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Mobile Safari/537.36"
 
                             CookieManager.getInstance().setAcceptCookie(true)
                             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+                            // Chrome Client for Console Logging
+                            webChromeClient = object : WebChromeClient() {
+                                override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                                    val msg = consoleMessage?.message() ?: ""
+                                    Log.d("AmexOfferJS", msg)
+                                    if (msg.startsWith("[AmexOfferActivator]")) {
+                                        statusText = msg.removePrefix("[AmexOfferActivator]").trim()
+                                    }
+                                    return super.onConsoleMessage(consoleMessage)
+                                }
+                            }
 
                             addJavascriptInterface(
                                 AmexOfferBridge(
@@ -141,7 +182,7 @@ fun AmexOfferWebViewScreen(
                                     }
 
                                     if (currentUrl.contains("offers") || currentUrl.contains("eligible")) {
-                                        statusText = "Offers page loaded. Launching (+) offer activator..."
+                                        statusText = "Offers page detected. Launching activator..."
                                         isActivating = true
                                         view?.evaluateJavascript(AUTO_ACTIVATOR_JS_SCRIPT, null)
                                     }
@@ -162,7 +203,8 @@ fun AmexOfferWebViewScreen(
 
 private const val AUTO_ACTIVATOR_JS_SCRIPT = """
 (function launchOfferActivator() {
-    window.isActivatingOffersRunning = true;
+    if (window.isActivatingScriptRunning) return;
+    window.isActivatingScriptRunning = true;
 
     function notify(msg) {
         console.log("[AmexOfferActivator] " + msg);
@@ -171,8 +213,20 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
         }
     }
 
+    function getAllButtons(root) {
+        let list = Array.from(root.querySelectorAll('button, div[role="button"], span[role="button"], a[role="button"], svg'));
+        // Include buttons inside shadow roots if present
+        const allElements = Array.from(root.querySelectorAll('*'));
+        allElements.forEach(el => {
+            if (el.shadowRoot) {
+                list = list.concat(getAllButtons(el.shadowRoot));
+            }
+        });
+        return list;
+    }
+
     function getEligibleButtons() {
-        const candidates = Array.from(document.querySelectorAll('button, div[role="button"], span[role="button"], a[role="button"]'));
+        const candidates = getAllButtons(document);
         
         return candidates.filter(el => {
             if (el.offsetWidth === 0 && el.offsetHeight === 0) return false;
@@ -194,9 +248,9 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
             let parent = el.parentElement;
             let isInsideOfferCard = false;
             let depth = 0;
-            while (parent && depth < 6) {
+            while (parent && depth < 7) {
                 const pText = (parent.innerText || '').toLowerCase();
-                if (pText.includes('terms apply') || pText.includes('view details') || pText.includes('spend')) {
+                if (pText.includes('terms apply') || pText.includes('view details') || pText.includes('spend') || pText.includes('earn')) {
                     isInsideOfferCard = true;
                     break;
                 }
@@ -221,33 +275,37 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
     }
 
     let attempts = 0;
-    const maxAttempts = 15;
+    const maxAttempts = 10;
     let totalActivated = 0;
 
     async function scanAndProcess() {
         attempts++;
-        notify("Attempt " + attempts + "/" + maxAttempts + ": Scanning DOM for (+) offer buttons...");
+        notify("Scanning DOM for (+) offer buttons (Attempt " + attempts + "/" + maxAttempts + ")...");
         
         window.scrollBy(0, 450);
 
         const buttons = getEligibleButtons();
 
         if (buttons.length > 0) {
-            notify("Found " + buttons.length + " eligible (+) offer button(s). Activating now...");
+            notify("Found " + buttons.length + " (+) offer button(s). Activating...");
             for (let i = 0; i < buttons.length; i++) {
                 try {
                     const btn = buttons[i];
                     btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    
+                    // Dispatch explicit pointer & mouse click events for React touch compatibility
+                    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                    btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
                     btn.click();
+
                     totalActivated++;
                     notify("Activated " + totalActivated + " of " + buttons.length + " offers...");
-                    await new Promise(r => setTimeout(r, 900 + Math.random() * 600));
+                    await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
                 } catch (e) {
                     console.error("Click error:", e);
                 }
             }
             
-            // Re-scan once after clicking initial batch to grab any newly revealed lazy-loaded cards
             window.scrollBy(0, 500);
             await new Promise(r => setTimeout(r, 1500));
             const extraButtons = getEligibleButtons();
@@ -260,17 +318,19 @@ private const val AUTO_ACTIVATOR_JS_SCRIPT = """
             if (window.AndroidBridge) {
                 window.AndroidBridge.onComplete(totalActivated);
             }
+            window.isActivatingScriptRunning = false;
             return;
         }
 
         if (attempts < maxAttempts) {
-            notify("Attempt " + attempts + "/" + maxAttempts + ": Waiting for (+) offer cards to render...");
+            notify("Waiting for (+) offer cards to render (Attempt " + attempts + "/" + maxAttempts + ")...");
             setTimeout(scanAndProcess, 1500);
         } else {
-            notify("No unactivated offers detected on screen. Tap 'Activate Offers Now' anytime.");
+            notify("No unactivated offers detected. Tap 'Activate Offers Now' anytime.");
             if (window.AndroidBridge) {
                 window.AndroidBridge.onComplete(0);
             }
+            window.isActivatingScriptRunning = false;
         }
     }
 
