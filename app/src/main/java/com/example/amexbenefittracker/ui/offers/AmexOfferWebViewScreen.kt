@@ -242,8 +242,36 @@ private const val FIND_AND_TAP_OFFERS_SCRIPT = """
         var candidates = [];
         var seen = new Set();
 
+        function isIgnored(el) {
+            if (!el) return true;
+            var txt = (el.innerText || '').trim().toLowerCase();
+            var aria = (el.getAttribute('aria-label') || '').toLowerCase();
+
+            // Ignore navigation, details, view all, feedback, and completed actions
+            if (txt.includes('view all') || txt.includes('view details') || txt.includes('view activity') ||
+                txt.includes('terms apply') || txt.includes('terms & conditions') || txt.includes('feedback') ||
+                txt.includes('added') || txt.includes('saved') || txt.includes('log out') || txt.includes('chat') ||
+                aria.includes('view all') || aria.includes('feedback') || aria.includes('close') || aria.includes('chat')) {
+                return true;
+            }
+
+            // Exclude elements inside "Added to Card" or "Saved from Offers" section containers
+            var ancestor = el.parentElement;
+            for (var d = 0; d < 8; d++) {
+                if (!ancestor) break;
+                var ancestorTxt = (ancestor.innerText || '').trim().toLowerCase();
+                // Check if container heading is Added to Card or Saved from Offers
+                if ((ancestorTxt.startsWith('added to card') || ancestorTxt.startsWith('saved from offers')) &&
+                    !ancestorTxt.includes('eligible')) {
+                    return true;
+                }
+                ancestor = ancestor.parentElement;
+            }
+            return false;
+        }
+
         function addCandidate(el, label) {
-            if (!el || seen.has(el)) return;
+            if (!el || seen.has(el) || isIgnored(el)) return;
             seen.add(el);
             candidates.push({ el: el, label: label || 'Offer' });
         }
@@ -252,15 +280,16 @@ private const val FIND_AND_TAP_OFFERS_SCRIPT = """
         var allElems = document.querySelectorAll('button, a, [role="button"], div, span');
         for (var i = 0; i < allElems.length; i++) {
             var el = allElems[i];
+            if (isIgnored(el)) continue;
+
             var txt = (el.innerText || '').trim().toLowerCase();
             var aria = (el.getAttribute('aria-label') || '').toLowerCase();
             var title = (el.getAttribute('title') || '').toLowerCase();
 
-            if (txt.includes('add to card') || txt.includes('add offer') || txt.includes('save offer') ||
+            if (txt === 'add to card' || txt === 'add offer' || txt === 'save offer' ||
                 aria.includes('add to card') || aria.includes('add offer') || aria.includes('save offer') ||
                 title.includes('add to card')) {
-                // Ignore elements with very long text (containers)
-                if (txt.length < 50 || aria.length < 50) {
+                if (txt.length < 50 && aria.length < 50) {
                     var parentCard = el.closest('[class*="offer"]') || el.closest('[class*="card"]') || el.parentElement;
                     var labelText = (parentCard ? parentCard.innerText : '').split('\n')[0] || 'Offer';
                     addCandidate(el, labelText.substring(0, 25));
@@ -277,7 +306,9 @@ private const val FIND_AND_TAP_OFFERS_SCRIPT = """
             for (var e = 0; e < allElements.length; e++) {
                 var elem = allElements[e];
                 var rawText = (elem.innerText || '').toLowerCase();
-                if ((rawText.includes('terms apply') || rawText.includes('spend') || rawText.includes('expires')) &&
+                // Exclude Added to Card section
+                if (rawText.includes('added to card') && !rawText.includes('eligible')) continue;
+                if ((rawText.includes('terms apply') || rawText.includes('spend')) &&
                     elem.offsetWidth > 150 && elem.offsetHeight > 60 && elem.offsetHeight < 300) {
                     cardContainers.push(elem);
                 }
@@ -288,11 +319,8 @@ private const val FIND_AND_TAP_OFFERS_SCRIPT = """
                 var btns = card.querySelectorAll('button, a, [role="button"]');
                 for (var b = 0; b < btns.length; b++) {
                     var btn = btns[b];
-                    var bTxt = (btn.innerText || '').trim().toLowerCase();
-                    if (!bTxt.includes('view details') && !bTxt.includes('terms') &&
-                        !bTxt.includes('added') && !bTxt.includes('saved')) {
-                        addCandidate(btn, card.innerText.split('\n')[0].substring(0, 25));
-                    }
+                    if (isIgnored(btn)) continue;
+                    addCandidate(btn, card.innerText.split('\n')[0].substring(0, 25));
                 }
             }
             notify("Strategy 2 (Card containers): " + candidates.length + " total");
@@ -304,9 +332,9 @@ private const val FIND_AND_TAP_OFFERS_SCRIPT = """
             var iconBtns = document.querySelectorAll('button');
             for (var k = 0; k < iconBtns.length; k++) {
                 var ib = iconBtns[k];
+                if (isIgnored(ib)) continue;
                 if (ib.querySelector('svg') && (ib.innerText || '').trim().length < 4) {
                     var aria = (ib.getAttribute('aria-label') || '').toLowerCase();
-                    // Skip general header/footer navigation
                     if (!aria.includes('menu') && !aria.includes('close') && !aria.includes('search') &&
                         !aria.includes('chat') && !aria.includes('log') && !aria.includes('back') &&
                         !aria.includes('next') && !aria.includes('previous') && !aria.includes('carousel')) {
