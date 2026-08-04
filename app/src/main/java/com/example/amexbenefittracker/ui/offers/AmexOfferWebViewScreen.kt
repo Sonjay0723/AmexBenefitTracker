@@ -84,61 +84,77 @@ fun AmexOfferWebViewScreen(
                     color = Slate900,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                        IconButton(
+                            onClick = {
+                                autoScanActive = false
+                                onDismiss()
+                            },
+                            modifier = Modifier.size(36.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconButton(
-                                    onClick = {
-                                        autoScanActive = false
-                                        onDismiss()
-                                    },
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                                }
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                        }
 
-                                Button(
-                                    onClick = {
-                                        isActivating = true
-                                        scriptRunning = false // Reset so it can run again
-                                        statusText = "Scanning for offers..."
-                                        runActivation(webViewInstance)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                    modifier = Modifier.padding(start = 4.dp)
-                                ) {
-                                    Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Activate Offers Now", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
+                        Button(
+                            onClick = {
+                                isActivating = true
+                                scriptRunning = false // Reset so it can run again
+                                statusText = "Scanning for offers..."
+                                runActivation(webViewInstance)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(start = 2.dp)
+                        ) {
+                            Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(2.dp))
+                            Text("Activate Offers Now", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
 
-                            IconButton(
-                                onClick = { webViewInstance?.reload() },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(Icons.Default.Refresh, contentDescription = "Reload Page", tint = Color.White)
+                        // Status Column: "Tapping (x/y):" on top, store name underneath
+                        val statusParts = remember(statusText) {
+                            if (statusText.contains(": ")) {
+                                val idx = statusText.indexOf(": ")
+                                Pair(statusText.substring(0, idx + 1), statusText.substring(idx + 2))
+                            } else {
+                                Pair(statusText, "")
                             }
                         }
 
-                        Text(
-                            text = statusText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 2,
-                            modifier = Modifier.padding(start = 44.dp, top = 2.dp, bottom = 2.dp)
-                        )
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 6.dp)
+                        ) {
+                            Text(
+                                text = statusParts.first,
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
+                            )
+                            if (statusParts.second.isNotEmpty()) {
+                                Text(
+                                    text = statusParts.second,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Normal,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { webViewInstance?.reload() },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Reload Page", tint = Color.White)
+                        }
                     }
                 }
 
