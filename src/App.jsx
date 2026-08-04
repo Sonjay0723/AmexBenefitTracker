@@ -45,7 +45,7 @@ const MONTH_ABBRS = [
   'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
 ];
 
-const DEFAULT_PLAID_WORKER_URL = 'https://amex-plaid-broker.jpitt.workers.dev';
+const DEFAULT_PLAID_WORKER_URL = 'https://amex-plaid-broker.jpitta0723.workers.dev';
 
 const INITIAL_DATA = {
   platinum: {
