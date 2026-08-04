@@ -143,9 +143,11 @@ fun AmexOfferWebViewScreen(
 
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
-                            settings.useWideViewPort = false
-                            settings.loadWithOverviewMode = false
+                            settings.databaseEnabled = true
+                            settings.useWideViewPort = true
+                            settings.loadWithOverviewMode = true
                             settings.javaScriptCanOpenWindowsAutomatically = true
+                            settings.setSupportMultipleWindows(false)
                             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
                             CookieManager.getInstance().setAcceptCookie(true)
