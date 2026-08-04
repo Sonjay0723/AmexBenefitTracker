@@ -11,24 +11,41 @@ import {
   ShoppingBag,
   RotateCcw,
   History,
-  Edit2,
-  HardDrive,
   LogOut,
   Mail,
   Lock,
   Eye,
-  EyeOff
+  EyeOff,
+  Settings,
+  Zap,
+  Building2,
+  Link2,
+  RefreshCw,
+  X,
+  ExternalLink,
+  Check,
+  AlertCircle,
+  Calendar,
+  DollarSign,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { auth, db, googleProvider, isConfigured } from './firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged
+} from 'firebase/auth';
+import { doc, getDoc, setDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
+const MONTH_ABBRS = [
+  'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+  'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
 ];
 
-const STORAGE_KEY = 'pitta_amex_tracker_v2';
+const DEFAULT_PLAID_WORKER_URL = 'https://amex-plaid-broker.jpitt.workers.dev';
 
 const INITIAL_DATA = {
   platinum: {
@@ -36,6 +53,7 @@ const INITIAL_DATA = {
     bgColor: 'bg-slate-950',
     accent: 'text-blue-400',
     accentBg: 'bg-blue-600',
+    activeColor: 'bg-blue-600 border-blue-500 text-white',
     fee: 895,
     defaultCorpCredit: 150,
     benefits: [
@@ -44,8 +62,8 @@ const INITIAL_DATA = {
       { id: 'p_uber_one', name: 'Uber One', total: 96, freq: 'annual', desc: 'Annual membership credit' },
       { id: 'p_resy', name: 'Resy Credit', total: 400, freq: 'quart', desc: '$100 per quarter' },
       { id: 'p_streaming', name: 'Digital Entertainment', total: 300, freq: 'month', desc: '$25 per month' },
-      { id: 'p_lulu', name: 'lululemon Credit', total: 300, freq: 'quart', desc: '$75 per quarter' },
-      { id: 'p_walmart', name: 'Walmart+', total: 98, freq: 'annual', desc: 'Annual membership credit' },
+      { id: 'p_lulu', name: 'Lululemon Credit', total: 300, freq: 'quart', desc: '$75 per quarter' },
+      { id: 'p_walmart', name: 'Walmart+', total: 155.40, freq: 'month', desc: '$12.95 per month' },
       { id: 'p_clear', name: 'CLEAR+ Credit', total: 209, freq: 'annual', desc: 'Full membership coverage' },
       { id: 'p_airline', name: 'Airline Fee Credit', total: 200, freq: 'annual', desc: 'Incidental fees only' }
     ]
@@ -55,12 +73,13 @@ const INITIAL_DATA = {
     bgColor: 'bg-slate-950',
     accent: 'text-amber-400',
     accentBg: 'bg-amber-600',
+    activeColor: 'bg-amber-600 border-amber-500 text-white',
     fee: 325,
     defaultCorpCredit: 100,
     benefits: [
       { id: 'g_uber', name: 'Uber Cash', total: 120, freq: 'month', desc: '$10 per month' },
       { id: 'g_dining', name: 'Dining Credit', total: 120, freq: 'month', desc: '$10 per month' },
-      { id: 'g_dunkin', name: 'Dunkin Credit', total: 84, freq: 'month', desc: '$7 per month' },
+      { id: 'g_dunkin', name: "Dunkin' Credit", total: 84, freq: 'month', desc: '$7 per month' },
       { id: 'g_resy', name: 'Resy Credit', total: 100, freq: 'semi', desc: '$50 per half-year' }
     ]
   }
@@ -73,7 +92,7 @@ const BENEFIT_MAP = {
   p_resy: { card: 'platinum', path: 'resy_credit', freq: 'quart' },
   p_streaming: { card: 'platinum', path: 'digital_entertainment', freq: 'month' },
   p_lulu: { card: 'platinum', path: 'lululemon_credit', freq: 'quart' },
-  p_walmart: { card: 'platinum', path: 'walmartplus', freq: 'annual' },
+  p_walmart: { card: 'platinum', path: 'walmartplus', freq: 'month' },
   p_clear: { card: 'platinum', path: 'clearplus_credit', freq: 'annual' },
   p_airline: { card: 'platinum', path: 'airline_fee_credit', freq: 'annual' },
   g_uber: { card: 'gold', path: 'uber_cash', freq: 'month' },
@@ -82,27 +101,79 @@ const BENEFIT_MAP = {
   g_resy: { card: 'gold', path: 'resy_credit', freq: 'semi' }
 };
 
+// Strict Amount Formatter to eliminate floating point glitches like $12.950000000000002
+const formatAmount = (val) => {
+  const num = Number(val);
+  if (isNaN(num)) return '$0';
+  if (Number.isInteger(num)) return `$${num}`;
+  return `$${num.toFixed(2)}`;
+};
+
 const getBenefitAmount = (benefitId, idx) => {
   if (benefitId === 'p_uber') {
     return idx === 11 ? 35 : 15;
   }
+  if (benefitId === 'p_walmart') {
+    return 12.95;
+  }
   for (const cardKey of ['platinum', 'gold']) {
     const benefit = INITIAL_DATA[cardKey].benefits.find(b => b.id === benefitId);
     if (benefit) {
-      if (benefit.freq === 'month') return benefit.total / 12;
-      if (benefit.freq === 'quart') return benefit.total / 4;
-      if (benefit.freq === 'semi') return benefit.total / 2;
-      if (benefit.freq === 'annual') return benefit.total;
+      if (benefit.freq === 'month') return Number((benefit.total / 12).toFixed(2));
+      if (benefit.freq === 'quart') return Number((benefit.total / 4).toFixed(2));
+      if (benefit.freq === 'semi') return Number((benefit.total / 2).toFixed(2));
+      if (benefit.freq === 'annual') return Number(benefit.total.toFixed(2));
     }
   }
   return 0;
 };
 
 const getPeriodInfo = (freq) => {
-  if (freq === 'annual') return { keys: ['Annual'], indices: [0] };
+  if (freq === 'annual') return { keys: ['ANNUAL CREDIT'], indices: [0] };
   if (freq === 'quart') return { keys: ['Q1', 'Q2', 'Q3', 'Q4'], indices: [0, 3, 6, 9] };
   if (freq === 'semi') return { keys: ['H1', 'H2'], indices: [0, 6] };
-  return { keys: Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')), indices: Array.from({ length: 12 }, (_, i) => i) };
+  return { keys: MONTH_ABBRS, indices: Array.from({ length: 12 }, (_, i) => i) };
+};
+
+const matchTransactionToBenefit = (txName, benefitName, amount = 0.0) => {
+  const name = (txName || '').toLowerCase();
+  switch (benefitName) {
+    case 'Uber Cash':
+      return name.includes('uber') && !name.includes('uber one');
+    case 'Uber One':
+      return name.includes('uber one');
+    case 'Hotel Credit':
+      return name.includes('fine hotels') || name.includes('hotel credit') || name.includes('hotel collection');
+    case 'Resy Credit':
+      return name.includes('resy');
+    case 'Digital Entertainment':
+      return name.includes('disney') || name.includes('hulu') || name.includes('peacock') ||
+        name.includes('ny times') || name.includes('new york times') || name.includes('espn') || name.includes('digital entertainment');
+    case 'Lululemon Credit':
+      return name.includes('lululemon');
+    case 'Walmart+': {
+      const isExplicitPlus = name.includes('walmart+') || name.includes('walmart plus') || name.includes('wm+ membership');
+      if (isExplicitPlus) return true;
+      if (name.includes('walmart')) {
+        const absVal = Math.abs(amount);
+        return absVal >= 12.00 && absVal <= 15.00;
+      }
+      return false;
+    }
+    case 'CLEAR+ Credit':
+      return name.includes('clear ') || name.includes('clear*') || name.includes('clear me');
+    case 'Airline Fee Credit':
+      return name.includes('delta') || name.includes('united air') || name.includes('american air') ||
+        name.includes('southwest') || name.includes('jetblue') || name.includes('alaska air') || name.includes('hawaiian air');
+    case 'Dining Credit':
+      return name.includes('dining credit') || name.includes('dining') || name.includes('grubhub') ||
+        name.includes('shake shack') || name.includes('five guys') || name.includes('cheesecake factory') ||
+        name.includes('goldbelly') || name.includes('wine.com');
+    case "Dunkin' Credit":
+      return name.includes('dunkin');
+    default:
+      return false;
+  }
 };
 
 const deserializeClaims = (claims, year) => {
@@ -125,14 +196,17 @@ const deserializeClaims = (claims, year) => {
       const monthIdx = indices[kIdx];
       let claim = null;
 
+      // Period key mapping
+      let firestorePeriodKey = key;
+      if (freq === 'annual') firestorePeriodKey = 'Annual';
+
       if (path === 'uber_cash') {
-        // Uber Cash is linked, look in both cards
-        const platClaims = claims['the_platinum_card']?.[year]?.['uber_cash']?.[key];
-        const goldClaims = claims['american_express_gold_card']?.[year]?.['uber_cash']?.[key];
+        const platClaims = claims['the_platinum_card']?.[year]?.['uber_cash']?.[firestorePeriodKey];
+        const goldClaims = claims['american_express_gold_card']?.[year]?.['uber_cash']?.[firestorePeriodKey];
         claim = platClaims || goldClaims;
       } else {
         const firestoreCardKey = cardMapping[card];
-        claim = claims[firestoreCardKey]?.[year]?.[path]?.[key];
+        claim = claims[firestoreCardKey]?.[year]?.[path]?.[firestorePeriodKey];
       }
 
       if (claim) {
@@ -161,7 +235,9 @@ const serializeClaims = (usage, timestamps, year) => {
 
     indices.forEach((monthIdx, kIdx) => {
       if (usedArr[monthIdx]) {
-        const periodKey = keys[kIdx];
+        let periodKey = keys[kIdx];
+        if (freq === 'annual') periodKey = 'Annual';
+
         const periodIdentifier = `${year}-${periodKey}`;
 
         if (path === 'uber_cash') {
@@ -188,604 +264,978 @@ const serializeClaims = (usage, timestamps, year) => {
 };
 
 export default function App() {
-  const [activeCard, setActiveCard] = useState('platinum');
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [activeCard, setActiveCard] = useState('gold');
   const [usage, setUsage] = useState({});
   const [timestamps, setTimestamps] = useState({});
+  
   const currentSystemYear = new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: 'America/New_York' }).format(new Date());
   const [trackingYear, setTrackingYear] = useState(currentSystemYear);
   const [allClaims, setAllClaims] = useState({});
+  
   const [corpCreditSettings, setCorpCreditSettings] = useState({
-    platinum: { enabled: false },
-    gold: { enabled: false }
+    platinum: { enabled: true },
+    gold: { enabled: true }
   });
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [user, setUser] = useState(null);
-  const [isAuthChecking, setIsAuthChecking] = useState(true);
-  const [showResetDialog, setShowResetDialog] = useState(false);
-  const [showSignOutDialog, setShowSignOutDialog] = useState(false);
 
-  // Load from Firestore on auth state change
+  // Plaid state
+  const [plaidToken, setPlaidToken] = useState(null);
+  const [plaidAccounts, setPlaidAccounts] = useState([]);
+  const [cardPlaidMappings, setCardPlaidMappings] = useState({ platinum: '', gold: '' });
+  const [syncCursor, setSyncCursor] = useState(null);
+  const [recentCredits, setRecentCredits] = useState([]);
+  const [isSyncingPlaid, setIsSyncingPlaid] = useState(false);
+  const [isRecentCreditsOpen, setIsRecentCreditsOpen] = useState(false);
+
+  // Modals state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isActivatorOpen, setIsActivatorOpen] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [plaidError, setPlaidError] = useState(null);
+
+  // Auth Form state
+  const [authMode, setAuthMode] = useState('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [authError, setAuthError] = useState('');
+
+  // 1. Firebase Auth listener
   useEffect(() => {
-    if (!isConfigured) {
-      setIsAuthChecking(false);
-      return;
-    }
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      try {
-        if (currentUser) {
-          const docRef = doc(db, 'users', currentUser.uid);
-          const docSnap = await getDoc(docRef);
-          
-          if (docSnap.exists()) {
-            const parsed = docSnap.data();
-            const yearToUse = currentSystemYear;
-            setTrackingYear(yearToUse);
-            setAllClaims(parsed.claims || {});
-
-            let loadedUsage = {};
-            let loadedTimestamps = {};
-            if (parsed.claims) {
-              const deserialized = deserializeClaims(parsed.claims, yearToUse);
-              loadedUsage = deserialized.usage;
-              loadedTimestamps = deserialized.timestamps;
-            } else if (parsed.usage) {
-              loadedUsage = parsed.usage;
-              Object.keys(BENEFIT_MAP).forEach(benefitId => {
-                loadedTimestamps[benefitId] = Array(12).fill(null);
-                if (parsed.usage[benefitId]) {
-                  parsed.usage[benefitId].forEach((val, idx) => {
-                    if (val) loadedTimestamps[benefitId][idx] = Date.now();
-                  });
-                }
-              });
-            } else {
-              Object.keys(INITIAL_DATA).forEach(cardKey => {
-                INITIAL_DATA[cardKey].benefits.forEach(b => {
-                  loadedUsage[b.id] = Array(12).fill(false);
-                  loadedTimestamps[b.id] = Array(12).fill(null);
-                });
-              });
-            }
-            setUsage(loadedUsage);
-            setTimestamps(loadedTimestamps);
-
-            // Restore Corporate Credit Status
-            const nextCorp = {
-              platinum: { enabled: parsed["corp_credit_The Platinum Card®"] || false },
-              gold: { enabled: parsed["corp_credit_American Express® Gold Card"] || false }
-            };
-            setCorpCreditSettings(nextCorp);
-          } else {
-            const initialUsage = {};
-            const initialTimestamps = {};
-            Object.keys(INITIAL_DATA).forEach(cardKey => {
-              INITIAL_DATA[cardKey].benefits.forEach(b => {
-                initialUsage[b.id] = Array(12).fill(false);
-                initialTimestamps[b.id] = Array(12).fill(null);
-              });
-            });
-            setUsage(initialUsage);
-            setTimestamps(initialTimestamps);
-          }
-          setIsLoaded(true);
-        } else {
-          setIsLoaded(false);
-        }
-      } catch (err) {
-        console.error("Error loading user data from Firestore:", err);
-        setIsLoaded(false);
-      } finally {
-        setIsAuthChecking(false);
-      }
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
     });
-
     return () => unsubscribe();
   }, []);
 
-  const updateLocalClaims = (nextUsage, nextTimestamps) => {
-    const newClaims = serializeClaims(nextUsage, nextTimestamps, trackingYear);
-    setAllClaims(prevClaims => {
-      const merged = { ...prevClaims };
-      Object.keys(newClaims).forEach(cardKey => {
-        merged[cardKey] = {
-          ...merged[cardKey],
-          [trackingYear]: newClaims[cardKey][trackingYear]
-        };
-      });
-      return merged;
-    });
-  };
-
-
-
-  const toggleMonth = (benefitId, monthIndex) => {
-    const currentArr = usage[benefitId] || Array(12).fill(false);
-    const newVal = !currentArr[monthIndex];
-    const nextUsage = { ...usage };
-    nextUsage[benefitId] = currentArr.map((val, idx) => idx === monthIndex ? newVal : val);
-
-    // Link Uber Cash across cards
-    if (benefitId === 'p_uber' || benefitId === 'g_uber') {
-      const otherId = benefitId === 'p_uber' ? 'g_uber' : 'p_uber';
-      const otherArr = usage[otherId] || Array(12).fill(false);
-      nextUsage[otherId] = otherArr.map((val, idx) => idx === monthIndex ? newVal : val);
-    }
-
-    const currentTSArr = timestamps[benefitId] || Array(12).fill(null);
-    const nextTimestamps = { ...timestamps };
-    nextTimestamps[benefitId] = currentTSArr.map((val, idx) => 
-      idx === monthIndex ? (newVal ? Date.now() : null) : val
-    );
-
-    // Link Uber Cash timestamps
-    if (benefitId === 'p_uber' || benefitId === 'g_uber') {
-      const otherId = benefitId === 'p_uber' ? 'g_uber' : 'p_uber';
-      const otherArr = timestamps[otherId] || Array(12).fill(null);
-      nextTimestamps[otherId] = otherArr.map((val, idx) => 
-        idx === monthIndex ? (newVal ? Date.now() : null) : val
-      );
-    }
-
-    setUsage(nextUsage);
-    setTimestamps(nextTimestamps);
-    updateLocalClaims(nextUsage, nextTimestamps);
-
-    if (user) {
-      setDoc(doc(db, 'users', user.uid), {
-        claims: serializeClaims(nextUsage, nextTimestamps, trackingYear),
-        "corp_credit_The Platinum Card®": corpCreditSettings.platinum.enabled,
-        "corp_credit_American Express® Gold Card": corpCreditSettings.gold.enabled
-      }, { merge: true }).catch((err) => {
-        console.error("Error saving user data to Firestore:", err);
-      });
-    }
-  };
-
-  const toggleCorpCredit = () => {
-    const nextSettings = {
-      ...corpCreditSettings,
-      [activeCard]: { ...corpCreditSettings[activeCard], enabled: !corpCreditSettings[activeCard]?.enabled }
-    };
-    setCorpCreditSettings(nextSettings);
-    updateLocalClaims(usage, timestamps);
-
-    if (user) {
-      setDoc(doc(db, 'users', user.uid), {
-        claims: serializeClaims(usage, timestamps, trackingYear),
-        "corp_credit_The Platinum Card®": nextSettings.platinum.enabled,
-        "corp_credit_American Express® Gold Card": nextSettings.gold.enabled
-      }, { merge: true }).catch((err) => {
-        console.error("Error saving user data to Firestore:", err);
-      });
-    }
-  };
-
-  const refreshData = async () => {
+  // 2. Firebase Firestore real-time snapshot listener
+  useEffect(() => {
     if (!user) return;
-    try {
-      const docRef = doc(db, 'users', user.uid);
-      const docSnap = await getDoc(docRef);
+
+    const userDocRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
-        const parsed = docSnap.data();
-        const yearToUse = currentSystemYear;
-        setTrackingYear(yearToUse);
-        setAllClaims(parsed.claims || {});
+        const data = docSnap.data();
+        
+        const remoteYear = data.tracking_year || currentSystemYear;
+        setTrackingYear(remoteYear);
 
-        let loadedUsage = {};
-        let loadedTimestamps = {};
-        if (parsed.claims) {
-          const deserialized = deserializeClaims(parsed.claims, yearToUse);
-          loadedUsage = deserialized.usage;
-          loadedTimestamps = deserialized.timestamps;
-        } else if (parsed.usage) {
-          loadedUsage = parsed.usage;
-          Object.keys(BENEFIT_MAP).forEach(benefitId => {
-            loadedTimestamps[benefitId] = Array(12).fill(null);
-            if (parsed.usage[benefitId]) {
-              parsed.usage[benefitId].forEach((val, idx) => {
-                if (val) loadedTimestamps[benefitId][idx] = Date.now();
-              });
-            }
-          });
+        if (data.claims) {
+          setAllClaims(data.claims);
+          const { usage: u, timestamps: t } = deserializeClaims(data.claims, remoteYear);
+          setUsage(u);
+          setTimestamps(t);
         }
-        setUsage(loadedUsage);
-        setTimestamps(loadedTimestamps);
 
-        // Restore Corporate Credit Status
-        const nextCorp = {
-          platinum: { enabled: parsed["corp_credit_The Platinum Card®"] || false },
-          gold: { enabled: parsed["corp_credit_American Express® Gold Card"] || false }
+        if (data.corp_credits) {
+          setCorpCreditSettings(data.corp_credits);
+        }
+
+        if (data.plaid_tokens) {
+          setPlaidToken(data.plaid_tokens.access_token || null);
+          setSyncCursor(data.plaid_tokens.sync_cursor || null);
+          if (data.plaid_tokens.card_mappings) {
+            setCardPlaidMappings(data.plaid_tokens.card_mappings);
+          }
+        }
+
+        if (Array.isArray(data.recent_credits)) {
+          setRecentCredits(data.recent_credits);
+        }
+      } else {
+        const initialDoc = {
+          tracking_year: currentSystemYear,
+          corp_credits: { platinum: { enabled: true }, gold: { enabled: true } },
+          claims: {},
+          recent_credits: []
         };
-        setCorpCreditSettings(nextCorp);
+        setDoc(userDocRef, initialDoc, { merge: true });
       }
-    } catch (err) {
-      console.error('Failed to refresh data:', err);
-    }
-  };
-
-  const handleReset = async () => {
-    setShowResetDialog(false);
-    
-    // Reset local state
-    const initialUsage = {};
-    const initialTimestamps = {};
-    Object.keys(INITIAL_DATA).forEach(cardKey => {
-      INITIAL_DATA[cardKey].benefits.forEach(b => {
-        initialUsage[b.id] = Array(12).fill(false);
-        initialTimestamps[b.id] = Array(12).fill(null);
-      });
-    });
-    setUsage(initialUsage);
-    setTimestamps(initialTimestamps);
-    setCorpCreditSettings({
-      platinum: { enabled: false },
-      gold: { enabled: false }
+    }, (error) => {
+      console.error('Firestore snapshot listener error:', error);
     });
 
-    // Reset Firestore data
-    if (user) {
-      try {
-        await deleteDoc(doc(db, 'users', user.uid));
-      } catch (err) {
-        console.error("Error resetting data in Firestore:", err);
-      }
-    }
-  };
+    return () => unsubscribe();
+  }, [user]);
 
-  const handleSignOut = () => {
-    signOut(auth);
-    setShowSignOutDialog(false);
-  };
-
-  const currentCard = INITIAL_DATA[activeCard];
-  const currentCorp = corpCreditSettings[activeCard] || { enabled: false };
-
-  const stats = useMemo(() => {
-    let totalValue = 0;
-    const benefitStats = currentCard.benefits.map(benefit => {
-      const usedMonths = usage[benefit.id] || Array(12).fill(false);
-      let earned = 0;
-      if (benefit.freq === 'month') {
-        const count = usedMonths.filter(Boolean).length;
-        if (benefit.id === 'p_uber') {
-          earned = usedMonths.reduce((acc, val, idx) => acc + (val ? (idx === 11 ? 35 : 15) : 0), 0);
-        } else {
-          earned = (benefit.total / 12) * count;
-        }
-      } else if (benefit.freq === 'quart') {
-        const qCount = [usedMonths[0], usedMonths[3], usedMonths[6], usedMonths[9]].filter(Boolean).length;
-        earned = qCount * (benefit.total / 4);
-      } else if (benefit.freq === 'semi') {
-        const hCount = [usedMonths[0], usedMonths[6]].filter(Boolean).length;
-        earned = hCount * (benefit.total / 2);
-      } else if (benefit.freq === 'annual') {
-        earned = usedMonths[0] ? benefit.total : 0;
-      }
-      totalValue += earned;
-      return { ...benefit, earned };
-    });
-
-    const activeCorpCredit = currentCorp.enabled ? currentCard.defaultCorpCredit : 0;
-    const effectiveFee = currentCard.fee - activeCorpCredit - totalValue;
-    return { totalValue, benefitStats, effectiveFee };
-  }, [activeCard, usage, currentCorp]);
-
-  const renderPeriods = (benefit) => {
-    const used = usage[benefit.id] || Array(12).fill(false);
-    if (benefit.freq === 'month') {
-      return MONTH_NAMES.map((m, i) => (
-        <button
-          key={m}
-          onClick={() => toggleMonth(benefit.id, i)}
-          className={`h-11 rounded-lg flex flex-col items-center justify-center transition-all col-span-1 border ${used[i] ? `${currentCard.accentBg} text-white border-transparent shadow-lg` : 'bg-slate-800/50 text-slate-400 hover:text-white border-slate-700/50'}`}
-        >
-          <span className="text-[10px] font-bold uppercase">{m.substring(0, 3)}</span>
-          <div className="mt-0.5">{used[i] ? <CheckCircle2 size={12} /> : <Circle size={12} className="opacity-30" />}</div>
-        </button>
-      ));
-    }
-
-    const configMap = {
-      quart: { span: 'col-span-3', labels: ['Q1', 'Q2', 'Q3', 'Q4'], idx: [0, 3, 6, 9] },
-      semi: { span: 'col-span-6', labels: ['Half 1', 'Half 2'], idx: [0, 6] },
-      annual: { span: 'col-span-12', labels: ['Annual Credit'], idx: [0] }
-    };
-
-    const config = configMap[benefit.freq];
-
-    return config.labels.map((label, i) => (
-      <button
-        key={label}
-        onClick={() => toggleMonth(benefit.id, config.idx[i])}
-        className={`h-11 rounded-lg flex flex-col items-center justify-center transition-all ${config.span} border ${used[config.idx[i]] ? `${currentCard.accentBg} text-white border-transparent shadow-lg` : 'bg-slate-800/50 text-slate-400 hover:text-white border-slate-700/50'}`}
-      >
-        <span className="text-[10px] font-bold uppercase">{label}</span>
-        <div className="mt-0.5">{used[config.idx[i]] ? <CheckCircle2 size={12} /> : <Circle size={12} className="opacity-30" />}</div>
-      </button>
-    ));
-  };
-
-  if (!isConfigured) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md bg-slate-900/60 backdrop-blur-md border border-red-900/50 rounded-3xl p-8 shadow-2xl text-center">
-          <img src="./logo.png" alt="Amex Logo" className="w-20 h-20 object-contain rounded-2xl shadow-lg mx-auto mb-6 opacity-50" />
-          <h2 className="text-2xl font-bold text-white mb-4">Setup Required</h2>
-          <p className="text-slate-400 mb-6">
-            You must provide your Firebase configuration in the <code className="bg-slate-800 px-2 py-1 rounded text-blue-400">.env</code> file before the app can run.
-          </p>
-          <p className="text-sm text-slate-500">
-            See the <strong>walkthrough.md</strong> file for instructions on how to set up Firebase and create your <code className="bg-slate-800 px-1 py-0.5 rounded text-slate-300">.env</code> file.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (isAuthChecking) {
-    return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>Loading...</div>;
-  }
-
-  if (!user) {
-    return <LoginScreen />;
-  }
-
-  const scrollbarColors = activeCard === 'platinum' 
-    ? { '--scrollbar-thumb': '#2563eb', '--scrollbar-thumb-hover': '#3b82f6' } 
-    : { '--scrollbar-thumb': '#d97706', '--scrollbar-thumb-hover': '#f59e0b' };
-
-  return (
-    <div className={`min-h-screen lg:h-screen flex flex-col p-4 md:p-8 bg-slate-950 text-white font-sans lg:overflow-hidden`} style={scrollbarColors}>
-      <header className="max-w-6xl w-full mx-auto mb-8 shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div className="flex items-center gap-4">
-          <img src="./logo.png" alt="Amex Logo" className="w-16 h-16 object-contain rounded-2xl shadow-lg" />
-          <div>
-            <h1 className="text-5xl font-bold tracking-tight mb-1">Amex Benefit Tracker</h1>
-            <p className="text-slate-400 italic">
-              Tracking{' '}
-              <span className="font-bold text-white select-none">
-                {trackingYear}
-              </span>{' '}
-              Refreshed Benefits
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <button onClick={refreshData} className="p-2 text-slate-600 hover:text-blue-400 transition-colors" title="Refresh from Cloud"><RotateCcw size={20} /></button>
-          <button onClick={() => setShowResetDialog(true)} className="p-2 text-slate-600 hover:text-blue-400 transition-colors" title="Reset Tracking"><History size={20} /></button>
-          <button onClick={() => setShowSignOutDialog(true)} className="p-2 text-slate-600 hover:text-red-400 transition-colors" title="Sign Out"><LogOut size={20} /></button>
-          <div className="flex bg-slate-900/50 backdrop-blur-md p-1 rounded-xl border border-slate-800">
-            <button onClick={() => setActiveCard('platinum')} className={`px-8 py-2 rounded-lg font-medium transition-all ${activeCard === 'platinum' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>Platinum</button>
-            <button onClick={() => setActiveCard('gold')} className={`px-8 py-2 rounded-lg font-medium transition-all ${activeCard === 'gold' ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>Gold</button>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 min-h-0">
-        <div className="space-y-6 lg:overflow-y-auto lg:pr-2">
-          <div className="bg-slate-900/40 backdrop-blur-sm border border-slate-800/50 p-8 rounded-3xl">
-            <div className="flex items-center gap-3 mb-6">
-              <span className={currentCard.accent}><CreditCard size={28} /></span>
-              <h3 className="text-[23px] font-bold">{currentCard.name}</h3>
-            </div>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center py-3 border-b border-slate-800/50">
-                <span className="text-slate-400">Standard Annual Fee</span>
-                <span className="font-mono font-bold text-white">${currentCard.fee}</span>
-              </div>
-              <div className="flex justify-between items-center py-3 border-b border-slate-800/50">
-                <div className="flex items-center gap-2">
-                  <button onClick={toggleCorpCredit} className={currentCorp.enabled ? 'text-emerald-400' : 'text-slate-600'}>
-                    {currentCorp.enabled ? <CheckCircle2 size={18} /> : <Circle size={18} />}
-                  </button>
-                  <span className={currentCorp.enabled ? 'text-slate-200' : 'text-slate-500'}>Corporate Credit</span>
-                </div>
-                <span className={`font-mono font-bold ${currentCorp.enabled ? 'text-emerald-400' : 'text-slate-600'}`}>-${currentCard.defaultCorpCredit}</span>
-              </div>
-              <div className="flex justify-between items-center py-3">
-                <span className="text-slate-400">Total Benefits Claimed</span>
-                <span className={`font-bold ${currentCard.accent}`}>-${stats.totalValue.toFixed(0)}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className={`p-8 rounded-3xl border shadow-xl transition-all ${stats.effectiveFee <= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-slate-900/60 border-slate-800'}`}>
-            <div className="flex items-center justify-between mb-4">
-              <div className={`p-2 rounded-lg bg-slate-800 ${currentCard.accent}`}><TrendingUp size={20} /></div>
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Effective Annual Fee</span>
-            </div>
-            <h2 className={`text-5xl font-black ${stats.effectiveFee <= 0 ? 'text-emerald-400' : 'text-white'}`}>
-              ${Math.abs(stats.effectiveFee).toFixed(0)}
-              {stats.effectiveFee <= 0 && <span className="text-xl ml-2 font-medium">Profit</span>}
-            </h2>
-            <p className="mt-4 text-xs text-slate-400 leading-relaxed">
-              {stats.effectiveFee <= 0 ? `Excellent management. You've officially 'beaten' the annual fee for ${trackingYear}.` : `Extract $${stats.effectiveFee.toFixed(0)} more in value to reach break-even status.`}
-            </p>
-          </div>
-        </div>
-
-        <div className="lg:col-span-2 space-y-4 lg:overflow-y-auto lg:pr-4 lg:pb-8">
-          {stats.benefitStats.map(b => (
-            <div key={b.id} className="bg-slate-900/50 backdrop-blur-sm border border-slate-800/50 rounded-2xl overflow-hidden p-6 hover:border-slate-700 transition-colors">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                <div>
-                  <h4 className="font-bold text-lg text-white">{b.name}</h4>
-                  <p className="text-xs text-slate-500">{b.desc}</p>
-                </div>
-                <div className="flex items-center gap-4 bg-slate-950/50 px-4 py-2 rounded-xl border border-slate-800/50">
-                  <span className="text-lg font-bold text-white">${b.earned.toFixed(0)} <span className="text-slate-500 text-xs font-normal">/ ${b.total}</span></span>
-                  <div className="w-20 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                    <div className={`h-full ${currentCard.accentBg}`} style={{ width: `${(b.earned / b.total) * 100}%` }}></div>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-12 gap-2">
-                {renderPeriods(b)}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-      {showResetDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-white mb-2">Amex Benefit Tracker</h3>
-            <p className="text-slate-400 text-sm mb-6">
-              Are you sure you want to reset your tracking progress?
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowResetDialog(false)}
-                className="px-4 py-2 text-slate-500 hover:text-slate-300 font-bold transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleReset}
-                className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-colors shadow-lg shadow-red-500/25"
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showSignOutDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-white mb-2">Amex Benefit Tracker</h3>
-            <p className="text-slate-400 text-sm mb-6">
-              Are you sure you want to sign out?
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowSignOutDialog(false)}
-                className="px-4 py-2 text-slate-500 hover:text-slate-300 font-bold transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSignOut}
-                className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-colors shadow-lg shadow-red-500/25"
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LoginScreen() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isLogin, setIsLogin] = useState(true);
-  const [error, setError] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-
-  const handleEmailAuth = async (e) => {
+  // Auth Submit
+  const handleAuthSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setAuthError('');
     try {
-      if (isLogin) {
+      if (authMode === 'login') {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
         await createUserWithEmailAndPassword(auth, email, password);
       }
     } catch (err) {
-      setError(err.message.replace('Firebase: ', ''));
+      setAuthError(err.message.replace('Firebase: ', ''));
     }
   };
 
-  const handleGoogleAuth = async () => {
-    setError('');
+  const handleGoogleSignIn = async () => {
+    setAuthError('');
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      setError(err.message.replace('Firebase: ', ''));
+      setAuthError(err.message.replace('Firebase: ', ''));
     }
   };
 
-  return (
-    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-3xl p-8 shadow-2xl">
-        <div className="flex flex-col items-center mb-8">
-          <img src="./logo.png" alt="Amex Logo" className="w-20 h-20 object-contain rounded-2xl shadow-lg mb-4" />
-          <h2 className="text-2xl font-bold text-white">Amex Benefit Tracker</h2>
-          <p className="text-slate-400 text-sm mt-1">{isLogin ? 'Sign in to access your data' : 'Create an account to start tracking'}</p>
+  const handleSignOut = async () => {
+    await signOut(auth);
+    setIsSettingsOpen(false);
+  };
+
+  // Toggle Benefit
+  const toggleBenefit = async (benefitId, idx) => {
+    if (!user) return;
+    
+    const newUsage = { ...usage };
+    const newTs = { ...timestamps };
+    if (!newUsage[benefitId]) newUsage[benefitId] = Array(12).fill(false);
+    if (!newTs[benefitId]) newTs[benefitId] = Array(12).fill(null);
+
+    const isClaimed = !newUsage[benefitId][idx];
+    newUsage[benefitId][idx] = isClaimed;
+    newTs[benefitId][idx] = isClaimed ? Date.now() : null;
+
+    if (benefitId === 'p_uber' || benefitId === 'g_uber') {
+      const otherId = benefitId === 'p_uber' ? 'g_uber' : 'p_uber';
+      if (!newUsage[otherId]) newUsage[otherId] = Array(12).fill(false);
+      if (!newTs[otherId]) newTs[otherId] = Array(12).fill(null);
+      newUsage[otherId][idx] = isClaimed;
+      newTs[otherId][idx] = isClaimed ? Date.now() : null;
+    }
+
+    setUsage(newUsage);
+    setTimestamps(newTs);
+
+    const serialized = serializeClaims(newUsage, newTs, trackingYear);
+    const updatedClaims = { ...allClaims };
+
+    Object.keys(serialized).forEach(cardKey => {
+      if (!updatedClaims[cardKey]) updatedClaims[cardKey] = {};
+      if (!updatedClaims[cardKey][trackingYear]) updatedClaims[cardKey][trackingYear] = {};
+      updatedClaims[cardKey][trackingYear] = {
+        ...updatedClaims[cardKey][trackingYear],
+        ...serialized[cardKey][trackingYear]
+      };
+    });
+
+    setAllClaims(updatedClaims);
+
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      await setDoc(userDocRef, {
+        claims: updatedClaims,
+        tracking_year: trackingYear
+      }, { merge: true });
+    } catch (e) {
+      console.error('Error saving claim:', e);
+    }
+  };
+
+  const toggleCorpCredit = async (cardKey) => {
+    if (!user) return;
+    const newSettings = {
+      ...corpCreditSettings,
+      [cardKey]: { enabled: !corpCreditSettings[cardKey]?.enabled }
+    };
+    setCorpCreditSettings(newSettings);
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      await setDoc(userDocRef, { corp_credits: newSettings }, { merge: true });
+    } catch (e) {
+      console.error('Error saving corp credit:', e);
+    }
+  };
+
+  const handleResetClaims = async () => {
+    if (!user) return;
+    const emptyUsage = {};
+    const emptyTs = {};
+    Object.keys(BENEFIT_MAP).forEach(id => {
+      emptyUsage[id] = Array(12).fill(false);
+      emptyTs[id] = Array(12).fill(null);
+    });
+    setUsage(emptyUsage);
+    setTimestamps(emptyTs);
+    setShowResetConfirm(false);
+
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      await setDoc(userDocRef, {
+        claims: {},
+        recent_credits: []
+      }, { merge: true });
+      setRecentCredits([]);
+    } catch (e) {
+      console.error('Error resetting claims:', e);
+    }
+  };
+
+  // Plaid Integration
+  const launchPlaidLink = async () => {
+    setPlaidError(null);
+    try {
+      const res = await fetch(`${DEFAULT_PLAID_WORKER_URL}/create-link-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.uid })
+      });
+      const data = await res.json();
+      if (!data.link_token) {
+        throw new Error(data.error || 'Failed to generate link token');
+      }
+
+      if (window.Plaid) {
+        const handler = window.Plaid.create({
+          token: data.link_token,
+          onSuccess: async (public_token) => {
+            await exchangePlaidPublicToken(public_token);
+          }
+        });
+        handler.open();
+      } else {
+        alert('Plaid Link SDK is loading... please try again.');
+      }
+    } catch (err) {
+      setPlaidError(err.message);
+    }
+  };
+
+  const exchangePlaidPublicToken = async (publicToken) => {
+    try {
+      const res = await fetch(`${DEFAULT_PLAID_WORKER_URL}/exchange-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publicToken })
+      });
+      const data = await res.json();
+      if (!data.access_token) {
+        throw new Error(data.error || 'Token exchange failed');
+      }
+      setPlaidToken(data.access_token);
+
+      const userDocRef = doc(db, 'users', user.uid);
+      await setDoc(userDocRef, {
+        plaid_tokens: {
+          access_token: data.access_token,
+          sync_cursor: null,
+          card_mappings: cardPlaidMappings
+        }
+      }, { merge: true });
+
+      await fetchPlaidAccounts(data.access_token);
+    } catch (err) {
+      setPlaidError(err.message);
+    }
+  };
+
+  const fetchPlaidAccounts = async (accessToken) => {
+    try {
+      const res = await fetch(`${DEFAULT_PLAID_WORKER_URL}/accounts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken })
+      });
+      const data = await res.json();
+      if (data.accounts) {
+        setPlaidAccounts(data.accounts);
+      }
+    } catch (err) {
+      console.error('Error fetching Plaid accounts:', err);
+    }
+  };
+
+  const mapCardToPlaid = async (cardKey, plaidAccountId) => {
+    const updated = { ...cardPlaidMappings, [cardKey]: plaidAccountId };
+    setCardPlaidMappings(updated);
+    if (!user) return;
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      await setDoc(userDocRef, {
+        plaid_tokens: {
+          access_token: plaidToken,
+          sync_cursor: syncCursor,
+          card_mappings: updated
+        }
+      }, { merge: true });
+    } catch (e) {
+      console.error('Error saving card mapping:', e);
+    }
+  };
+
+  const syncPlaidTransactions = async () => {
+    if (!plaidToken || !user) return;
+    setIsSyncingPlaid(true);
+    setPlaidError(null);
+
+    try {
+      const res = await fetch(`${DEFAULT_PLAID_WORKER_URL}/sync-transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: plaidToken, cursor: syncCursor })
+      });
+      const data = await res.json();
+      
+      const newAdded = data.added || [];
+      const nextCursor = data.next_cursor || data.nextCursor || syncCursor;
+      setSyncCursor(nextCursor);
+
+      const matchedList = [...recentCredits];
+      const newUsage = { ...usage };
+      const newTs = { ...timestamps };
+
+      newAdded.forEach((tx) => {
+        const txName = tx.name || tx.merchant_name || '';
+        const txAmount = tx.amount || 0;
+        const txDate = tx.date || new Date().toISOString().split('T')[0];
+
+        ['platinum', 'gold'].forEach((cardKey) => {
+          INITIAL_DATA[cardKey].benefits.forEach((benefit) => {
+            if (matchTransactionToBenefit(txName, benefit.name, txAmount)) {
+              const monthIdx = new Date(txDate).getMonth();
+              if (!newUsage[benefit.id]) newUsage[benefit.id] = Array(12).fill(false);
+              if (!newTs[benefit.id]) newTs[benefit.id] = Array(12).fill(null);
+
+              newUsage[benefit.id][monthIdx] = true;
+              newTs[benefit.id][monthIdx] = new Date(txDate).getTime();
+
+              matchedList.unshift({
+                id: tx.transaction_id || Math.random().toString(),
+                date: txDate,
+                merchant: txName,
+                benefitName: benefit.name,
+                amount: Math.abs(txAmount),
+                card: cardKey
+              });
+            }
+          });
+        });
+      });
+
+      const uniqueMatched = [];
+      const seen = new Set();
+      matchedList.forEach(item => {
+        const key = `${item.date}-${item.merchant}-${item.amount}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueMatched.push(item);
+        }
+      });
+
+      setUsage(newUsage);
+      setTimestamps(newTs);
+      setRecentCredits(uniqueMatched.slice(0, 20));
+
+      const serialized = serializeClaims(newUsage, newTs, trackingYear);
+
+      const userDocRef = doc(db, 'users', user.uid);
+      await setDoc(userDocRef, {
+        claims: serialized,
+        recent_credits: uniqueMatched.slice(0, 20),
+        plaid_tokens: {
+          access_token: plaidToken,
+          sync_cursor: nextCursor,
+          card_mappings: cardPlaidMappings
+        }
+      }, { merge: true });
+
+    } catch (err) {
+      setPlaidError(err.message);
+    } finally {
+      setIsSyncingPlaid(false);
+    }
+  };
+
+  // Card Stats Math
+  const cardStats = useMemo(() => {
+    const card = INITIAL_DATA[activeCard];
+    const isCorp = corpCreditSettings[activeCard]?.enabled;
+    const corpCreditVal = isCorp ? card.defaultCorpCredit : 0;
+    const standardFee = card.fee;
+    
+    let totalBenefitsClaimed = 0;
+
+    card.benefits.forEach(b => {
+      const usedArr = usage[b.id] || Array(12).fill(false);
+      const { indices } = getPeriodInfo(b.freq);
+
+      indices.forEach((monthIdx) => {
+        if (usedArr[monthIdx]) {
+          totalBenefitsClaimed += getBenefitAmount(b.id, monthIdx);
+        }
+      });
+    });
+
+    totalBenefitsClaimed = Number(totalBenefitsClaimed.toFixed(2));
+    
+    // Effective Annual Fee Calculation:
+    // Standard Fee - Corporate Credit - Total Benefits Claimed
+    // If negative -> Profit!
+    const netResult = standardFee - corpCreditVal - totalBenefitsClaimed;
+    const isProfit = netResult <= 0;
+    const profitOrFeeAmount = Math.abs(netResult);
+
+    return {
+      standardFee,
+      corpCreditVal,
+      isCorp,
+      totalBenefitsClaimed,
+      isProfit,
+      profitOrFeeAmount
+    };
+  }, [activeCard, usage, corpCreditSettings]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#070b14] text-slate-100 flex items-center justify-center">
+        <div className="flex items-center space-x-3 text-blue-400">
+          <RefreshCw className="w-6 h-6 animate-spin" />
+          <span className="text-lg font-medium">Loading Amex Tracker...</span>
         </div>
+      </div>
+    );
+  }
 
-        {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm text-center">{error}</div>}
+  // Auth Screen
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#070b14] text-slate-100 flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-[#0e1626] border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-6">
+          <div className="text-center space-y-3">
+            <img src="/logo.png" alt="Amex Logo" className="w-16 h-16 object-contain mx-auto" />
+            <h1 className="text-2xl font-bold tracking-tight text-white">Amex Benefit Tracker</h1>
+            <p className="text-sm text-slate-400">Cloud synchronized across all your browsers</p>
+          </div>
 
-        <form onSubmit={handleEmailAuth} className="space-y-4">
-          <div>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-              <input 
-                type="email" 
-                placeholder="Email address" 
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
-                required
-              />
+          {authError && (
+            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start space-x-3 text-red-400 text-sm">
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          <button
+            onClick={handleGoogleSignIn}
+            className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-2xl font-medium flex items-center justify-center space-x-3 transition-colors shadow-sm"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+            </svg>
+            <span>Continue with Google</span>
+          </button>
+
+          <div className="relative flex items-center justify-center my-4">
+            <div className="border-t border-slate-800 w-full" />
+            <span className="bg-[#0e1626] px-3 text-xs text-slate-500 uppercase font-medium">Or email</span>
+          </div>
+
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Email address</label>
+              <div className="relative">
+                <Mail className="w-5 h-5 text-slate-500 absolute left-3 top-3" />
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  className="w-full pl-10 pr-4 py-2.5 bg-[#070b14] border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500 text-sm"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Password</label>
+              <div className="relative">
+                <Lock className="w-5 h-5 text-slate-500 absolute left-3 top-3" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full pl-10 pr-10 py-2.5 bg-[#070b14] border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3 text-slate-500 hover:text-slate-400"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-medium transition-colors shadow-lg shadow-blue-600/25"
+            >
+              {authMode === 'login' ? 'Sign In' : 'Create Account'}
+            </button>
+          </form>
+
+          <div className="text-center pt-2">
+            <button
+              onClick={() => {
+                setAuthMode(authMode === 'login' ? 'register' : 'login');
+                setAuthError('');
+              }}
+              className="text-xs text-blue-400 hover:underline"
+            >
+              {authMode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const currentCard = INITIAL_DATA[activeCard];
+
+  return (
+    <div className="min-h-screen bg-[#070b14] text-slate-100 font-sans pb-16">
+      {/* Top Header */}
+      <header className="sticky top-0 z-30 bg-[#070b14]/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3">
+        <div className="max-w-md mx-auto sm:max-w-2xl md:max-w-4xl lg:max-w-5xl flex items-center justify-between gap-3">
+          <div className="flex items-center space-x-3">
+            {/* Actual Amex Logo image instead of generic card symbol */}
+            <img src="/logo.png" alt="Amex Logo" className="w-10 h-10 object-contain rounded-lg" />
+            <div>
+              <h1 className="text-base font-bold text-white leading-tight">Amex Benefit Tracker</h1>
+              <p className="text-xs text-slate-400">
+                Tracking <strong className="text-white">{trackingYear}</strong> Refreshed Benefits
+              </p>
             </div>
           </div>
+
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2.5 bg-[#0e1626] hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-2xl transition-colors shadow-sm"
+              title="Settings"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Container */}
+      <main className="max-w-md mx-auto sm:max-w-2xl md:max-w-4xl lg:max-w-5xl px-4 pt-4 space-y-4">
+        
+        {/* Wide Card Selector Buttons */}
+        <div className="grid grid-cols-2 gap-2 bg-[#0e1626] p-1.5 rounded-2xl border border-slate-800/80">
+          <button
+            onClick={() => setActiveCard('platinum')}
+            className={`py-3 rounded-xl font-bold text-sm transition-all text-center ${
+              activeCard === 'platinum'
+                ? 'bg-[#2563eb] text-white shadow-lg shadow-blue-500/20'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Platinum
+          </button>
+          <button
+            onClick={() => setActiveCard('gold')}
+            className={`py-3 rounded-xl font-bold text-sm transition-all text-center ${
+              activeCard === 'gold'
+                ? 'bg-[#d97706] text-white shadow-lg shadow-amber-500/20'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Gold
+          </button>
+        </div>
+
+        {/* Card 1: Card Overview & Fee Breakdown */}
+        <div className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-5 space-y-4 shadow-xl">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-white">{currentCard.name}</h2>
+            <CreditCard className="w-5 h-5 text-amber-500/90" />
+          </div>
+
+          <div className="space-y-2.5 pt-1 text-sm">
+            <div className="flex items-center justify-between text-slate-400">
+              <span>Standard Annual Fee</span>
+              <span className="font-bold text-white">${cardStats.standardFee}</span>
+            </div>
+
+            {/* Interactive Corporate Credit Toggle Row */}
+            <div
+              onClick={() => toggleCorpCredit(activeCard)}
+              className="flex items-center justify-between cursor-pointer select-none py-1 hover:bg-slate-800/30 rounded-lg transition-colors px-1 -mx-1"
+              title="Click to toggle Corporate Credit"
+            >
+              <span className={`flex items-center space-x-2 font-medium transition-colors ${
+                cardStats.isCorp ? 'text-emerald-400' : 'text-slate-500'
+              }`}>
+                {cardStats.isCorp ? (
+                  <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400 flex-shrink-0" />
+                ) : (
+                  <Circle className="w-4.5 h-4.5 text-slate-600 flex-shrink-0" />
+                )}
+                <span>Corporate Credit</span>
+              </span>
+              <span className={`font-bold transition-colors ${
+                cardStats.isCorp ? 'text-emerald-400' : 'text-slate-500'
+              }`}>
+                -${cardStats.corpCreditVal}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-amber-400">
+              <span>Total Benefits Claimed</span>
+              <span className="font-bold">
+                -${formatAmount(cardStats.totalBenefitsClaimed).replace('$', '')}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 2: EFFECTIVE ANNUAL FEE Profit / Fee Box */}
+        <div className={`border rounded-2xl p-5 shadow-xl space-y-2 transition-all ${
+          cardStats.isProfit
+            ? 'bg-[#0a201c] border-emerald-500/30 shadow-emerald-950/20'
+            : 'bg-[#0e1626] border-slate-800/80'
+        }`}>
+          <div className="flex items-center justify-between text-xs font-bold text-slate-400 tracking-wider uppercase">
+            <span>EFFECTIVE ANNUAL FEE</span>
+            <TrendingUp className={`w-4 h-4 ${cardStats.isProfit ? 'text-emerald-400' : 'text-amber-500'}`} />
+          </div>
+
+          <div className="flex items-baseline space-x-2">
+            <span className={`text-3xl font-extrabold transition-colors ${
+              cardStats.isProfit ? 'text-emerald-400' : 'text-white'
+            }`}>
+              {formatAmount(cardStats.profitOrFeeAmount)}
+            </span>
+            <span className={`text-lg font-bold transition-colors ${
+              cardStats.isProfit ? 'text-emerald-400' : 'text-slate-400'
+            }`}>
+              {cardStats.isProfit ? 'Profit' : 'Fee'}
+            </span>
+          </div>
+        </div>
+
+        {/* Card 3: Quick Actions */}
+        <div className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-3">
           <div>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-              <input 
-                type={showPassword ? "text" : "password"} 
-                placeholder="Password" 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-12 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+            <h3 className="text-sm font-bold text-white">Quick Actions</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Automate card offer activations and benefit sync</p>
+          </div>
+
+          <button
+            onClick={() => setIsActivatorOpen(true)}
+            className="w-full py-3.5 px-4 bg-[#5b21b6] hover:bg-[#6d28d9] text-white rounded-2xl font-bold text-sm flex items-center justify-center space-x-2 transition-colors shadow-lg shadow-purple-900/30"
+          >
+            <Zap className="w-4 h-4 fill-amber-300 text-amber-300" />
+            <span>Auto-Activate Card Offers</span>
+          </button>
+        </div>
+
+        {/* Card 4: Recent Credits Section */}
+        <div className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-4 shadow-xl space-y-3">
+          <button
+            onClick={() => setIsRecentCreditsOpen(!isRecentCreditsOpen)}
+            className="w-full flex items-center justify-between text-left"
+          >
+            <h3 className="text-sm font-bold text-white">Recent Credits</h3>
+            {isRecentCreditsOpen ? (
+              <ChevronUp className="w-5 h-5 text-amber-400" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-amber-400" />
+            )}
+          </button>
+
+          {isRecentCreditsOpen && (
+            <div className="pt-2 space-y-3 border-t border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-slate-400">Plaid synced statement charges</p>
+                <button
+                  onClick={syncPlaidTransactions}
+                  disabled={!plaidToken || isSyncingPlaid}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 ${
+                    plaidToken ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  }`}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingPlaid ? 'animate-spin' : ''}`} />
+                  <span>Sync</span>
+                </button>
+              </div>
+
+              {recentCredits.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-2">No recent synced credits.</p>
+              ) : (
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {recentCredits.map((credit, i) => (
+                    <div key={i} className="p-2.5 bg-[#070b14] border border-slate-800 rounded-xl flex items-center justify-between text-xs">
+                      <div>
+                        <div className="font-bold text-white">{credit.merchant}</div>
+                        <div className="text-[10px] text-slate-400">{credit.date} • {credit.benefitName}</div>
+                      </div>
+                      <div className="font-bold text-emerald-400">${credit.amount}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Benefits Grid */}
+        <div className="space-y-3 pt-2">
+          {currentCard.benefits.map((benefit) => {
+            const usedArr = usage[benefit.id] || Array(12).fill(false);
+            const { keys, indices } = getPeriodInfo(benefit.freq);
+            
+            // Calculate total claimed for this benefit
+            let claimedVal = 0;
+            indices.forEach((mIdx) => {
+              if (usedArr[mIdx]) {
+                claimedVal += getBenefitAmount(benefit.id, mIdx);
+              }
+            });
+
+            const ratioText = `${formatAmount(claimedVal)} / ${formatAmount(benefit.total)}`;
+
+            return (
+              <div
+                key={benefit.id}
+                className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-3"
               >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                {/* Header Row: Title & Ratio */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-white text-base leading-tight">{benefit.name}</h4>
+                    <p className="text-xs text-slate-400 mt-0.5">{benefit.desc}</p>
+                  </div>
+
+                  <div className="text-right">
+                    <span className={`text-base font-extrabold ${
+                      activeCard === 'platinum' ? 'text-[#60a5fa]' : 'text-[#fbbf24]'
+                    }`}>
+                      {ratioText}
+                    </span>
+                    <div className="w-12 h-0.5 ml-auto mt-0.5 rounded-full bg-slate-700" />
+                  </div>
+                </div>
+
+                {/* Period Buttons Grid */}
+                <div className={`grid gap-2 ${
+                  benefit.freq === 'month' ? 'grid-cols-6' : benefit.freq === 'quart' ? 'grid-cols-4' : 'grid-cols-2'
+                }`}>
+                  {keys.map((label, kIdx) => {
+                    const monthIdx = indices[kIdx];
+                    const isClaimed = usedArr[monthIdx];
+
+                    return (
+                      <button
+                        key={label}
+                        onClick={() => toggleBenefit(benefit.id, monthIdx)}
+                        className={`py-3 px-2 rounded-xl text-xs font-bold transition-all text-center uppercase tracking-wide border ${
+                          isClaimed
+                            ? activeCard === 'platinum'
+                              ? 'bg-[#2563eb] border-[#3b82f6] text-white shadow-md shadow-blue-600/30'
+                              : 'bg-[#d97706] border-[#f59e0b] text-white shadow-md shadow-amber-600/30'
+                            : 'bg-[#070b14] border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </main>
+
+      {/* Settings Modal */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0e1626] border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <h3 className="text-lg font-bold text-white flex items-center space-x-2">
+                <Settings className="w-5 h-5 text-blue-400" />
+                <span>Settings & Integration</span>
+              </h3>
+              <button onClick={() => setIsSettingsOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {plaidError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 flex items-start space-x-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>{plaidError}</span>
+              </div>
+            )}
+
+            {/* Account */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Account</label>
+              <div className="p-3 bg-[#070b14] border border-slate-800 rounded-2xl flex items-center justify-between">
+                <div className="text-xs">
+                  <div className="font-bold text-white">{user?.email || 'User'}</div>
+                  <div className="text-emerald-400 text-[10px]">Cloud Synced</div>
+                </div>
+                <button
+                  onClick={handleSignOut}
+                  className="px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl text-xs font-bold hover:bg-red-500/20"
+                >
+                  Sign Out
+                </button>
+              </div>
+            </div>
+
+            {/* Plaid Link */}
+            <div className="space-y-2.5">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Plaid Transaction Link</label>
+              <div className="p-4 bg-[#070b14] border border-slate-800 rounded-2xl space-y-3">
+                <button
+                  onClick={launchPlaidLink}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition-all"
+                >
+                  <Link2 className="w-4 h-4" />
+                  <span>{plaidToken ? 'Relink Accounts via Plaid' : 'Connect Amex via Plaid'}</span>
+                </button>
+
+                {plaidToken && (
+                  <div className="pt-2 space-y-2 border-t border-slate-800 text-xs">
+                    <label className="block text-[11px] font-bold text-slate-400">Card Mappings</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block mb-1">Platinum Account ID</span>
+                        <input
+                          type="text"
+                          placeholder="Plaid Account ID"
+                          value={cardPlaidMappings.platinum || ''}
+                          onChange={(e) => mapCardToPlaid('platinum', e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-[#0e1626] border border-slate-800 rounded-xl text-slate-200 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block mb-1">Gold Account ID</span>
+                        <input
+                          type="text"
+                          placeholder="Plaid Account ID"
+                          value={cardPlaidMappings.gold || ''}
+                          onChange={(e) => mapCardToPlaid('gold', e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-[#0e1626] border border-slate-800 rounded-xl text-slate-200 text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Reset */}
+            <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-red-400">Reset Benefit Claims</div>
+                <div className="text-[10px] text-slate-500">Clear checked benefits for current year</div>
+              </div>
+              <button
+                onClick={() => setShowResetConfirm(true)}
+                className="px-3.5 py-1.5 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 rounded-xl text-xs font-bold"
+              >
+                Reset
               </button>
             </div>
           </div>
-          
-          <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-blue-600/20">
-            {isLogin ? 'Sign In' : 'Create Account'}
-          </button>
-        </form>
-
-        <div className="mt-6 mb-6 relative flex items-center justify-center">
-          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-800"></div></div>
-          <span className="relative px-4 bg-slate-900/60 text-slate-500 text-sm">or</span>
         </div>
+      )}
 
-        <button 
-          onClick={handleGoogleAuth}
-          type="button"
-          className="w-full bg-slate-800 hover:bg-slate-700 text-white font-medium py-3 rounded-xl transition-colors border border-slate-700 flex items-center justify-center gap-2"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 24 24">
-            <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-            <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-            <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-            <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-          </svg>
-          Continue with Google
-        </button>
+      {/* Auto-Activator Assistant Modal */}
+      {isActivatorOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0e1626] border border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <h3 className="text-lg font-bold text-white flex items-center space-x-2">
+                <Zap className="w-5 h-5 text-amber-400 fill-amber-400" />
+                <span>Amex Offer Auto-Activator</span>
+              </h3>
+              <button onClick={() => setIsActivatorOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-        <p className="mt-8 text-center text-sm text-slate-400">
-          {isLogin ? "Don't have an account? " : "Already have an account? "}
-          <button onClick={() => setIsLogin(!isLogin)} className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
-            {isLogin ? 'Sign up' : 'Sign in'}
-          </button>
-        </p>
-      </div>
+            <div className="space-y-3 text-xs text-slate-300">
+              <p>Activate 100+ Amex offers on your cards automatically in seconds.</p>
+
+              <div className="p-4 bg-[#070b14] border border-slate-800 rounded-2xl space-y-2.5 font-sans">
+                <div className="text-slate-400 font-bold">Step-by-Step Guide:</div>
+                <ol className="list-decimal list-inside space-y-1.5 text-slate-300">
+                  <li>Log in to <a href="https://global.americanexpress.com/offers/eligible" target="_blank" rel="noreferrer" className="text-blue-400 underline font-bold">americanexpress.com/offers</a>.</li>
+                  <li>Press <kbd className="bg-slate-800 px-1.5 py-0.5 rounded font-mono text-[10px]">F12</kbd> to open Browser Developer Console.</li>
+                  <li>Click Copy Script below, paste into Console, and press <kbd className="bg-slate-800 px-1.5 py-0.5 rounded font-mono text-[10px]">Enter</kbd>.</li>
+                </ol>
+              </div>
+
+              <div className="bg-[#070b14] p-3 rounded-2xl border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Auto-Activation Script</span>
+                  <button
+                    onClick={() => {
+                      const scriptText = `(function(){const btns=Array.from(document.querySelectorAll('button')).filter(b=>b.textContent.includes('Add to Card')||b.textContent.includes('Enroll'));console.log('Found '+btns.length+' offers');btns.forEach((b,i)=>setTimeout(()=>b.click(),i*400));})();`;
+                      navigator.clipboard.writeText(scriptText);
+                      alert('Script copied to clipboard!');
+                    }}
+                    className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-xl text-[10px] font-bold hover:bg-amber-500/20"
+                  >
+                    Copy Script
+                  </button>
+                </div>
+                <pre className="text-[10px] text-emerald-400 overflow-x-auto whitespace-pre-wrap font-mono p-2 bg-[#0e1626] rounded-xl">
+                  {`(function() {
+  const btns = Array.from(document.querySelectorAll('button')).filter(b => 
+    b.textContent.includes('Add to Card') || b.textContent.includes('Enroll')
+  );
+  console.log('Found ' + btns.length + ' offers');
+  btns.forEach((b, i) => setTimeout(() => b.click(), i * 400));
+})();`}
+                </pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Reset */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0e1626] border border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-center">
+            <h4 className="text-base font-bold text-white">Reset All Claims?</h4>
+            <p className="text-xs text-slate-400">Are you sure you want to clear all checked benefits for {trackingYear}?</p>
+            <div className="flex items-center justify-center space-x-3 pt-2">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleResetClaims}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold shadow-md"
+              >
+                Confirm Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
