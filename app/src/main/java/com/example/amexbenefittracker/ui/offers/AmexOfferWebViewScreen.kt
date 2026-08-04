@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -79,55 +80,67 @@ fun AmexOfferWebViewScreen(
             color = Slate950
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(
-                                text = "${issuer.displayName} Auto-Activator",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = statusText,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 2
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = {
-                            autoScanActive = false
-                            onDismiss()
-                        }) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                        }
-                    },
-                    actions = {
-                        Button(
-                            onClick = {
-                                isActivating = true
-                                scriptRunning = false // Reset so it can run again
-                                statusText = "Scanning for offers..."
-                                runActivation(webViewInstance)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.padding(end = 4.dp)
+                Surface(
+                    color = Slate900,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Activate Offers Now", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        autoScanActive = false
+                                        onDismiss()
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        isActivating = true
+                                        scriptRunning = false // Reset so it can run again
+                                        statusText = "Scanning for offers..."
+                                        runActivation(webViewInstance)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.padding(start = 4.dp)
+                                ) {
+                                    Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Activate Offers Now", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            IconButton(
+                                onClick = { webViewInstance?.reload() },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Reload Page", tint = Color.White)
+                            }
                         }
-                        IconButton(onClick = {
-                            webViewInstance?.reload()
-                        }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Reload Page", tint = Color.White)
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Slate900)
-                )
+
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 2,
+                            modifier = Modifier.padding(start = 44.dp, top = 2.dp, bottom = 2.dp)
+                        )
+                    }
+                }
 
                 if (isActivating) {
                     LinearProgressIndicator(
@@ -182,6 +195,10 @@ fun AmexOfferWebViewScreen(
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     super.onPageFinished(view, url)
                                     val currentUrl = url ?: ""
+
+                                    // Inject CSS unclip listener for card selector
+                                    view?.evaluateJavascript(UNCLIP_CARD_SWITCHER_SCRIPT, null)
+
                                     if (!hasNavigatedToOffers && (currentUrl.contains("dashboard") || currentUrl.contains("account/summary"))) {
                                         hasNavigatedToOffers = true
                                         statusText = "Logged in! Navigating to Amex Offers..."
@@ -421,5 +438,28 @@ private const val FIND_AND_TAP_OFFERS_SCRIPT = """
 
         processIndex(0);
     }
+})();
+"""
+
+private const val UNCLIP_CARD_SWITCHER_SCRIPT = """
+(function() {
+    function unclipContainers() {
+        var all = document.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            var txt = (el.innerText || '').toLowerCase();
+            if (txt.includes('91004') || txt.includes('select card') || el.getAttribute('aria-haspopup')) {
+                var p = el.parentElement;
+                while (p && p !== document.body) {
+                    p.style.overflow = 'visible';
+                    p.style.maxHeight = 'none';
+                    p = p.parentElement;
+                }
+            }
+        }
+    }
+    unclipContainers();
+    document.addEventListener('click', unclipContainers, true);
+    document.addEventListener('touchend', unclipContainers, true);
 })();
 """
