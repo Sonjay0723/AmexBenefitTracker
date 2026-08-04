@@ -246,12 +246,16 @@ private const val FIND_AND_TAP_OFFERS_SCRIPT = """
             if (!el) return true;
             var txt = (el.innerText || '').trim().toLowerCase();
             var aria = (el.getAttribute('aria-label') || '').toLowerCase();
+            var href = (el.getAttribute('href') || '').toLowerCase();
 
-            // Ignore navigation, details, view all, feedback, and completed actions
+            // Ignore navigation, promotional cards, details, view all, learn more, and completed actions
             if (txt.includes('view all') || txt.includes('view details') || txt.includes('view activity') ||
+                txt.includes('view map') || txt.includes('learn more') || txt.includes('explore') ||
+                txt.includes('enroll') || txt.includes('apply now') || txt.includes('get started') ||
                 txt.includes('terms apply') || txt.includes('terms & conditions') || txt.includes('feedback') ||
                 txt.includes('added') || txt.includes('saved') || txt.includes('log out') || txt.includes('chat') ||
-                aria.includes('view all') || aria.includes('feedback') || aria.includes('close') || aria.includes('chat')) {
+                aria.includes('view all') || aria.includes('learn more') || aria.includes('feedback') ||
+                aria.includes('close') || aria.includes('chat') || href.includes('product') || href.includes('banking')) {
                 return true;
             }
 
