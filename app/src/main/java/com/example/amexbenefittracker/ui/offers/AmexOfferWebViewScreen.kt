@@ -221,168 +221,169 @@ private const val FIND_AND_TAP_OFFERS_SCRIPT = """
         }
     }
 
-    notify("Scrolling page to load all offers...");
+    notify("Step 1: Auto-scrolling page to discover all offers...");
 
-    // Step 1: Scroll the page to trigger lazy loading
-    var scrollStep = 0;
-    var maxScrollSteps = 10;
-    var scrollInterval = setInterval(function() {
-        window.scrollBy(0, 600);
-        scrollStep++;
-        if (scrollStep >= maxScrollSteps) {
-            clearInterval(scrollInterval);
+    // Smooth scroll down to load lazy components
+    var scrollCount = 0;
+    var maxScrolls = 8;
+    var scrollTimer = setInterval(function() {
+        window.scrollBy(0, 700);
+        scrollCount++;
+        if (scrollCount >= maxScrolls) {
+            clearInterval(scrollTimer);
             window.scrollTo(0, 0);
-            setTimeout(function() { findButtons(); }, 2000);
+            setTimeout(function() { startScanning(); }, 1500);
         }
-    }, 300);
+    }, 350);
 
-    function findButtons() {
-        notify("Scanning for 'Add to Card' buttons...");
+    function startScanning() {
+        notify("Step 2: Finding eligible offer 'Add' buttons...");
 
-        var targets = [];
+        var candidates = [];
         var seen = new Set();
 
-        function addTarget(el, label) {
-            if (seen.has(el)) return;
+        function addCandidate(el, label) {
+            if (!el || seen.has(el)) return;
             seen.add(el);
-            var rect = el.getBoundingClientRect();
-            // Only add visible, on-screen elements
-            if (rect.width < 5 || rect.height < 5) return;
-            if (rect.top < -100 || rect.left < -100) return;
-
-            targets.push({
-                el: el,
-                x: rect.left + rect.width / 2,
-                y: rect.top + rect.height / 2,
-                label: label || ''
-            });
-            console.log("[AmexOfferActivator] Found: '" + label + "' at (" + Math.round(rect.left + rect.width/2) + ", " + Math.round(rect.top + rect.height/2) + ") size=" + Math.round(rect.width) + "x" + Math.round(rect.height));
+            candidates.push({ el: el, label: label || 'Offer' });
         }
 
-        // ============================================================
-        // STRATEGY A: Exact text match for "Add to Card" buttons
-        // ============================================================
-        var allClickable = document.querySelectorAll('button, a, [role="button"]');
-        for (var i = 0; i < allClickable.length; i++) {
-            var el = allClickable[i];
+        // 1. Text & Aria matching (case-insensitive substring)
+        var allElems = document.querySelectorAll('button, a, [role="button"], div, span');
+        for (var i = 0; i < allElems.length; i++) {
+            var el = allElems[i];
             var txt = (el.innerText || '').trim().toLowerCase();
             var aria = (el.getAttribute('aria-label') || '').toLowerCase();
-            if (txt === 'add to card' || txt === 'add' ||
-                aria.includes('add to card') || aria.includes('add offer') ||
-                aria.includes('save offer') || aria.includes('add to') ) {
-                var parentText = (el.closest('[class]') || {}).innerText || '';
-                var merchantName = parentText.split('\n')[0] || 'offer';
-                addTarget(el, merchantName.substring(0, 25));
-            }
-        }
-        notify("Strategy A (text 'Add to Card'): " + targets.length + " found");
+            var title = (el.getAttribute('title') || '').toLowerCase();
 
-        // ============================================================
-        // STRATEGY B: Find offer cards via "Terms apply" → find their action button
-        // ============================================================
-        var termsEls = [];
-        var allEls = document.querySelectorAll('*');
-        for (var t = 0; t < allEls.length; t++) {
-            var te = allEls[t];
-            var dText = '';
-            for (var c = 0; c < te.childNodes.length; c++) {
-                if (te.childNodes[c].nodeType === 3) dText += te.childNodes[c].textContent;
-            }
-            if (dText.toLowerCase().includes('terms apply')) termsEls.push(te);
-        }
-        notify("Found " + termsEls.length + " 'Terms apply' markers");
-
-        if (targets.length === 0 && termsEls.length > 0) {
-            // Only use Strategy B if Strategy A found nothing
-            for (var k = 0; k < termsEls.length; k++) {
-                var container = termsEls[k];
-                // Walk up to find the offer card container
-                for (var d = 0; d < 15; d++) {
-                    if (!container.parentElement) break;
-                    container = container.parentElement;
-                    if (container.offsetHeight > 60 && container.offsetWidth > 80) break;
-                }
-
-                // Find the LAST button or role="button" in the card (usually the action button)
-                var btns = container.querySelectorAll('button, [role="button"]');
-                var lastBtn = null;
-                for (var j = 0; j < btns.length; j++) {
-                    var b = btns[j];
-                    var bTxt = (b.innerText || '').trim().toLowerCase();
-                    if (bTxt.includes('view details') || bTxt.includes('terms apply') ||
-                        bTxt.includes('added') || bTxt.includes('saved') ||
-                        bTxt.includes('log') || bTxt.includes('view all')) continue;
-                    lastBtn = b;
-                }
-                if (lastBtn) {
-                    // Try to get the merchant name from the card
-                    var cardText = (container.innerText || '').split('\n')[0] || 'offer';
-                    addTarget(lastBtn, cardText.substring(0, 25));
+            if (txt.includes('add to card') || txt.includes('add offer') || txt.includes('save offer') ||
+                aria.includes('add to card') || aria.includes('add offer') || aria.includes('save offer') ||
+                title.includes('add to card')) {
+                // Ignore elements with very long text (containers)
+                if (txt.length < 50 || aria.length < 50) {
+                    var parentCard = el.closest('[class*="offer"]') || el.closest('[class*="card"]') || el.parentElement;
+                    var labelText = (parentCard ? parentCard.innerText : '').split('\n')[0] || 'Offer';
+                    addCandidate(el, labelText.substring(0, 25));
                 }
             }
-            notify("Strategy B (card scan): " + targets.length + " total");
         }
+        notify("Strategy 1 (Add text/aria): " + candidates.length + " found");
 
-        // ============================================================
-        // STRATEGY C: SVG-only buttons (the blue "+" circles)
-        // ============================================================
-        if (targets.length === 0) {
-            // Only try this if A and B found nothing
-            var allBtns = document.querySelectorAll('button');
-            for (var sb = 0; sb < allBtns.length; sb++) {
-                var btn = allBtns[sb];
-                if (!btn.querySelector('svg')) continue;
-                if ((btn.innerText || '').trim().length > 2) continue;
-                var bAria = (btn.getAttribute('aria-label') || '').toLowerCase();
-                if (bAria.includes('close') || bAria.includes('menu') || bAria.includes('search') ||
-                    bAria.includes('back') || bAria.includes('navigate') || bAria.includes('chat') ||
-                    bAria.includes('log') || bAria.includes('feedback') || bAria.includes('previous') ||
-                    bAria.includes('next') || bAria.includes('carousel') || bAria.includes('hamburger')) continue;
-                if (btn.offsetWidth > 10 && btn.offsetHeight > 10 && btn.offsetWidth < 80) {
-                    addTarget(btn, 'icon-btn');
+        // 2. Offer card containers (if strategy 1 yielded 0)
+        if (candidates.length === 0) {
+            notify("Searching offer cards for action buttons...");
+            var allElements = document.querySelectorAll('*');
+            var cardContainers = [];
+            for (var e = 0; e < allElements.length; e++) {
+                var elem = allElements[e];
+                var rawText = (elem.innerText || '').toLowerCase();
+                if ((rawText.includes('terms apply') || rawText.includes('spend') || rawText.includes('expires')) &&
+                    elem.offsetWidth > 150 && elem.offsetHeight > 60 && elem.offsetHeight < 300) {
+                    cardContainers.push(elem);
                 }
             }
-            notify("Strategy C (SVG buttons): " + targets.length + " total");
+
+            for (var c = 0; c < cardContainers.length; c++) {
+                var card = cardContainers[c];
+                var btns = card.querySelectorAll('button, a, [role="button"]');
+                for (var b = 0; b < btns.length; b++) {
+                    var btn = btns[b];
+                    var bTxt = (btn.innerText || '').trim().toLowerCase();
+                    if (!bTxt.includes('view details') && !bTxt.includes('terms') &&
+                        !bTxt.includes('added') && !bTxt.includes('saved')) {
+                        addCandidate(btn, card.innerText.split('\n')[0].substring(0, 25));
+                    }
+                }
+            }
+            notify("Strategy 2 (Card containers): " + candidates.length + " total");
         }
 
-        // ============================================================
-        // REPORT COORDINATES TO KOTLIN FOR NATIVE TAP INJECTION
-        // ============================================================
-        notify("Found " + targets.length + " offer buttons total.");
+        // 3. Fallback: Icon buttons within offer list (if 1 & 2 failed)
+        if (candidates.length === 0) {
+            notify("Searching icon buttons in offer list...");
+            var iconBtns = document.querySelectorAll('button');
+            for (var k = 0; k < iconBtns.length; k++) {
+                var ib = iconBtns[k];
+                if (ib.querySelector('svg') && (ib.innerText || '').trim().length < 4) {
+                    var aria = (ib.getAttribute('aria-label') || '').toLowerCase();
+                    // Skip general header/footer navigation
+                    if (!aria.includes('menu') && !aria.includes('close') && !aria.includes('search') &&
+                        !aria.includes('chat') && !aria.includes('log') && !aria.includes('back') &&
+                        !aria.includes('next') && !aria.includes('previous') && !aria.includes('carousel')) {
+                        if (ib.offsetWidth > 15 && ib.offsetWidth < 80 && ib.offsetHeight > 15 && ib.offsetHeight < 80) {
+                            addCandidate(ib, 'Icon Button');
+                        }
+                    }
+                }
+            }
+            notify("Strategy 3 (Icon buttons): " + candidates.length + " total");
+        }
 
-        if (targets.length === 0) {
-            notify("No eligible offer buttons found. Make sure you're on the Eligible offers page.");
+        if (candidates.length === 0) {
+            notify("No eligible offer buttons found. Ensure you are on the Eligible offers page.");
             if (window.AndroidBridge) {
                 window.AndroidBridge.onOffersActivated(0);
             }
             return;
         }
 
-        // Build coordinates array for Kotlin
-        var coords = [];
-        for (var n = 0; n < targets.length; n++) {
-            coords.push({
-                x: targets[n].x,
-                y: targets[n].y,
-                label: targets[n].label
-            });
+        notify("Step 3: Sequential Activation (" + candidates.length + " candidates)...");
+        var dpr = window.devicePixelRatio || 1.0;
+        var activated = 0;
+
+        function processIndex(idx) {
+            if (idx >= candidates.length) {
+                notify("Finished! Activated " + activated + " offer(s).");
+                if (window.AndroidBridge) {
+                    window.AndroidBridge.onOffersActivated(activated);
+                }
+                return;
+            }
+
+            var item = candidates[idx];
+            var el = item.el;
+
+            // Scroll element to center of screen
+            el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+
+            setTimeout(function() {
+                var rect = el.getBoundingClientRect();
+                // Verify element is visible in viewport
+                if (rect.width > 0 && rect.height > 0 &&
+                    rect.top >= -50 && rect.top <= (window.innerHeight + 50)) {
+
+                    var cssX = rect.left + rect.width / 2;
+                    var cssY = rect.top + rect.height / 2;
+                    var viewX = cssX * dpr;
+                    var viewY = cssY * dpr;
+
+                    notify("Tapping (" + (idx+1) + "/" + candidates.length + "): " + item.label);
+                    console.log("[AmexOfferActivator] Tapping item " + idx + " (" + item.label + ") at CSS(" + Math.round(cssX) + "," + Math.round(cssY) + ") View(" + Math.round(viewX) + "," + Math.round(viewY) + ")");
+
+                    // 1. Native MotionEvent tap via Kotlin bridge
+                    if (window.AndroidBridge && window.AndroidBridge.tapAt) {
+                        window.AndroidBridge.tapAt(viewX, viewY, item.label);
+                    }
+
+                    // 2. Backup JS event dispatch
+                    try {
+                        el.focus();
+                        el.click();
+                    } catch(e) {}
+
+                    activated++;
+                } else {
+                    console.log("[AmexOfferActivator] Item " + idx + " not visible after scroll. Skipping.");
+                }
+
+                // Wait 1.5s for Amex API response to settle before processing next offer
+                setTimeout(function() {
+                    processIndex(idx + 1);
+                }, 1500);
+            }, 300);
         }
 
-        notify("Sending " + coords.length + " button coordinates for native tap...");
-
-        // Send to Kotlin for MotionEvent injection
-        if (window.AndroidBridge && window.AndroidBridge.tapButtons) {
-            window.AndroidBridge.tapButtons(JSON.stringify(coords));
-        } else {
-            notify("Error: Native tap not available. Falling back to JS click...");
-            // Fallback: try JS clicks
-            for (var f = 0; f < targets.length; f++) {
-                try { targets[f].el.click(); } catch(e) {}
-            }
-            if (window.AndroidBridge) {
-                window.AndroidBridge.onOffersActivated(targets.length);
-            }
-        }
+        processIndex(0);
     }
 })();
 """
