@@ -42,6 +42,7 @@ fun AmexOfferWebViewScreen(
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var autoScanActive by remember { mutableStateOf(true) }
     var scriptRunning by remember { mutableStateOf(false) }
+    var hasNavigatedToOffers by remember { mutableStateOf(false) }
 
     fun runActivation(wv: WebView?) {
         if (scriptRunning) return
@@ -49,7 +50,7 @@ fun AmexOfferWebViewScreen(
         wv?.evaluateJavascript(FIND_AND_TAP_OFFERS_SCRIPT, null)
     }
 
-    // Coroutine Poller - checks URL and triggers activation on offers page
+    // Coroutine Poller - checks URL and triggers initial redirect after login
     LaunchedEffect(webViewInstance, autoScanActive) {
         if (webViewInstance == null || !autoScanActive) return@LaunchedEffect
         while (autoScanActive) {
@@ -59,11 +60,11 @@ fun AmexOfferWebViewScreen(
                 withContext(Dispatchers.Main) {
                     val currentUrl = webView.url ?: ""
                     Log.d("AmexOfferWebView", "Polling URL: $currentUrl")
-                    if (currentUrl.contains("dashboard") || currentUrl.contains("account/summary")) {
+                    if (!hasNavigatedToOffers && (currentUrl.contains("dashboard") || currentUrl.contains("account/summary"))) {
+                        hasNavigatedToOffers = true
                         statusText = "Logged in! Redirecting to Amex Offers..."
                         webView.loadUrl(issuer.offersUrl)
                     }
-                    // Don't auto-run on offers page - let user click the button
                 }
             }
         }
@@ -179,7 +180,8 @@ fun AmexOfferWebViewScreen(
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     super.onPageFinished(view, url)
                                     val currentUrl = url ?: ""
-                                    if (currentUrl.contains("dashboard") || currentUrl.contains("account/summary")) {
+                                    if (!hasNavigatedToOffers && (currentUrl.contains("dashboard") || currentUrl.contains("account/summary"))) {
+                                        hasNavigatedToOffers = true
                                         statusText = "Logged in! Navigating to Amex Offers..."
                                         view?.loadUrl(issuer.offersUrl)
                                         return
