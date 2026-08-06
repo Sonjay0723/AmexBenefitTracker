@@ -927,22 +927,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Card 3: Quick Actions */}
-        <div className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-3">
-          <div>
-            <h3 className="text-sm font-bold text-white">Quick Actions</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Automate card offer activations and benefit sync</p>
-          </div>
-
-          <button
-            onClick={() => setIsActivatorOpen(true)}
-            className="w-full py-3.5 px-4 bg-[#5b21b6] hover:bg-[#6d28d9] text-white rounded-2xl font-bold text-sm flex items-center justify-center space-x-2 transition-colors shadow-lg shadow-purple-900/30"
-          >
-            <Zap className="w-4 h-4 fill-amber-300 text-amber-300" />
-            <span>Auto-Activate Card Offers</span>
-          </button>
-        </div>
-
         {/* Card 4: Recent Credits Section */}
         <div className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-4 shadow-xl space-y-3">
           <button
@@ -1099,9 +1083,26 @@ export default function App() {
               </div>
             </div>
 
-            {/* Plaid Link */}
+            {/* Auto-Activate Offers */}
             <div className="space-y-2.5">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Plaid Transaction Link</label>
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Auto-Activate Offers</label>
+              <div className="p-4 bg-[#070b14] border border-slate-800 rounded-2xl space-y-3">
+                <button
+                  onClick={() => {
+                    setIsSettingsOpen(false);
+                    setIsActivatorOpen(true);
+                  }}
+                  className="w-full py-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition-all"
+                >
+                  <Zap className="w-4 h-4 fill-amber-400 text-amber-400" />
+                  <span>Auto-Activate Card Offers</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Bank Connection */}
+            <div className="space-y-2.5">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Bank Connection</label>
               <div className="p-4 bg-[#070b14] border border-slate-800 rounded-2xl space-y-3">
                 <button
                   onClick={launchPlaidLink}
