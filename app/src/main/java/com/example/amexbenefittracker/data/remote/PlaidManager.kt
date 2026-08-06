@@ -38,8 +38,10 @@ class PlaidManager(private val context: Context) {
 
     fun getCloudFunctionUrl(): String {
         val savedUrl = prefs.getString("cloud_function_url", "") ?: ""
-        if (savedUrl.isNotEmpty()) return savedUrl
-        return BuildConfig.PLAID_CLOUD_FUNCTION_URL
+        if (savedUrl.isNotEmpty() && !savedUrl.contains("localhost")) return savedUrl
+        val buildConfigUrl = BuildConfig.PLAID_CLOUD_FUNCTION_URL
+        if (buildConfigUrl.isNotEmpty() && !buildConfigUrl.contains("localhost")) return buildConfigUrl
+        return "https://amex-plaid-broker.jpitta0723.workers.dev"
     }
 
     fun hasCloudFunctionUrl(): Boolean {

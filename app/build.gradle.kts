@@ -14,7 +14,7 @@ val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
     localProperties.load(FileInputStream(localPropertiesFile))
 }
-val plaidCloudFunctionUrl = localProperties.getProperty("PLAID_CLOUD_FUNCTION_URL") ?: ""
+val plaidCloudFunctionUrl = localProperties.getProperty("PLAID_CLOUD_FUNCTION_URL") ?: "https://amex-plaid-broker.jpitta0723.workers.dev"
 
 android {
     namespace = "com.example.amexbenefittracker"
