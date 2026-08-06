@@ -291,10 +291,6 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                                             viewModel.toggleCorporateCredit()
                                         }
                                         EffectiveFeeSection(summary, accentTextColor)
-                                        QuickActionsSection(
-                                            onAutoActivateOffersClick = { showIssuerDialog = true },
-                                            accentTextColor = accentTextColor
-                                        )
                                         RecentCreditsSection(
                                             transactions = transactions,
                                             isRefreshing = isRefreshing,
@@ -430,6 +426,46 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                                 )
                                 Text(
                                     text = "Link Amex Accounts",
+                                    color = Slate400,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Auto-Activate Offers Option Card
+                    Surface(
+                        onClick = {
+                            showIssuerDialog = true
+                            showSettingsPanel = false
+                        },
+                        color = Slate900,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Slate800),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FlashOn,
+                                contentDescription = "Auto-Activate Offers",
+                                tint = Slate400,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text(
+                                    text = "Auto-Activate Offers",
+                                    color = TextWhite,
+                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Text(
+                                    text = "Automate card offer activations",
                                     color = Slate400,
                                     style = MaterialTheme.typography.bodyMedium
                                 )
@@ -950,65 +986,6 @@ fun EditableYearSubheader(trackingYear: String) {
             modifier = Modifier.padding(vertical = 4.dp)
         )
         Text(" Refreshed Benefits", style = MaterialTheme.typography.bodySmall, color = Slate500)
-    }
-}
-
-@Composable
-fun QuickActionsSection(
-    onAutoActivateOffersClick: () -> Unit,
-    accentTextColor: Color
-) {
-    Surface(
-        color = Slate900.copy(alpha = 0.4f),
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, Slate800, RoundedCornerShape(24.dp))
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Text(
-                text = "Quick Actions",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Automate card offer activations and benefit sync",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Button(
-                onClick = onAutoActivateOffersClick,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                ),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.padding(vertical = 4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FlashOn,
-                        contentDescription = "Auto-Activate Offers",
-                        tint = accentTextColor
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Auto-Activate Card Offers",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-        }
     }
 }
 
