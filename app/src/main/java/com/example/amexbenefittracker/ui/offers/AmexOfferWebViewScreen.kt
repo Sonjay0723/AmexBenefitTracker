@@ -289,10 +289,10 @@ private const val FIND_AND_TAP_OFFERS_SCRIPT = """
             if (txt.includes('view all') || txt.includes('view details') || txt.includes('view activity') ||
                 txt.includes('view offer') || txt.includes('view map') || txt.includes('learn more') ||
                 txt.includes('see my score') || txt.includes('explore') || txt.includes('enroll') || txt.includes('apply now') || txt.includes('get started') ||
-                txt.includes('terms apply') || txt.includes('terms & conditions') || txt.includes('feedback') ||
+                txt.includes('refer now') || txt.includes('terms apply') || txt.includes('terms & conditions') || txt.includes('feedback') ||
                 txt.includes('added') || txt.includes('saved') || txt.includes('log out') || txt.includes('chat') ||
                 aria.includes('view all') || aria.includes('view offer') || aria.includes('see my score') || aria.includes('learn more') || aria.includes('feedback') ||
-                aria.includes('close') || aria.includes('chat') || href.includes('product') || href.includes('banking')) {
+                aria.includes('refer now') || aria.includes('close') || aria.includes('chat') || href.includes('product') || href.includes('banking')) {
                 return true;
             }
 
