@@ -176,6 +176,19 @@ const matchTransactionToBenefit = (txName, benefitName, amount = 0.0) => {
   }
 };
 
+const getPossibleFirestorePeriodKeys = (freq, key, monthIdx) => {
+  if (freq === 'month') {
+    const pad = String(monthIdx + 1).padStart(2, '0');
+    const noPad = String(monthIdx + 1);
+    const abbr = MONTH_ABBRS[monthIdx] || key;
+    return [pad, noPad, abbr];
+  }
+  if (freq === 'annual') {
+    return ['Annual', 'ANNUAL CREDIT', 'ANNUAL', key];
+  }
+  return [key];
+};
+
 const deserializeClaims = (claims, year) => {
   const usage = {}, timestamps = {};
   Object.keys(BENEFIT_MAP).forEach(id => {
@@ -196,17 +209,18 @@ const deserializeClaims = (claims, year) => {
       const monthIdx = indices[kIdx];
       let claim = null;
 
-      // Period key mapping
-      let firestorePeriodKey = key;
-      if (freq === 'annual') firestorePeriodKey = 'Annual';
+      const candidateKeys = getPossibleFirestorePeriodKeys(freq, key, monthIdx);
 
-      if (path === 'uber_cash') {
-        const platClaims = claims['the_platinum_card']?.[year]?.['uber_cash']?.[firestorePeriodKey];
-        const goldClaims = claims['american_express_gold_card']?.[year]?.['uber_cash']?.[firestorePeriodKey];
-        claim = platClaims || goldClaims;
-      } else {
-        const firestoreCardKey = cardMapping[card];
-        claim = claims[firestoreCardKey]?.[year]?.[path]?.[firestorePeriodKey];
+      for (const fKey of candidateKeys) {
+        if (path === 'uber_cash') {
+          const platClaims = claims['the_platinum_card']?.[year]?.['uber_cash']?.[fKey];
+          const goldClaims = claims['american_express_gold_card']?.[year]?.['uber_cash']?.[fKey];
+          claim = platClaims || goldClaims;
+        } else {
+          const firestoreCardKey = cardMapping[card];
+          claim = claims[firestoreCardKey]?.[year]?.[path]?.[fKey];
+        }
+        if (claim) break;
       }
 
       if (claim) {
@@ -236,7 +250,11 @@ const serializeClaims = (usage, timestamps, year) => {
     indices.forEach((monthIdx, kIdx) => {
       if (usedArr[monthIdx]) {
         let periodKey = keys[kIdx];
-        if (freq === 'annual') periodKey = 'Annual';
+        if (freq === 'month') {
+          periodKey = String(monthIdx + 1).padStart(2, '0');
+        } else if (freq === 'annual') {
+          periodKey = 'Annual';
+        }
 
         const periodIdentifier = `${year}-${periodKey}`;
 
@@ -287,6 +305,7 @@ export default function App() {
   const [recentCredits, setRecentCredits] = useState([]);
   const [isSyncingPlaid, setIsSyncingPlaid] = useState(false);
   const [isRecentCreditsOpen, setIsRecentCreditsOpen] = useState(false);
+  const [isRefreshingCloud, setIsRefreshingCloud] = useState(false);
 
   // Modals state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -359,6 +378,50 @@ export default function App() {
 
     return () => unsubscribe();
   }, [user]);
+
+  // 3. Manual Firestore Refresh Handler
+  const handleManualRefresh = async () => {
+    if (!user) return;
+    setIsRefreshingCloud(true);
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      const docSnap = await getDoc(userDocRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const remoteYear = data.tracking_year || currentSystemYear;
+        setTrackingYear(remoteYear);
+
+        if (data.claims) {
+          setAllClaims(data.claims);
+          const { usage: u, timestamps: t } = deserializeClaims(data.claims, remoteYear);
+          setUsage(u);
+          setTimestamps(t);
+        }
+
+        if (data.corp_credits) {
+          setCorpCreditSettings(data.corp_credits);
+        }
+
+        if (data.plaid_tokens) {
+          setPlaidToken(data.plaid_tokens.access_token || null);
+          setSyncCursor(data.plaid_tokens.sync_cursor || null);
+          if (data.plaid_tokens.card_mappings) {
+            setCardPlaidMappings(data.plaid_tokens.card_mappings);
+          }
+        }
+
+        if (Array.isArray(data.recent_credits)) {
+          setRecentCredits(data.recent_credits);
+        }
+      }
+    } catch (error) {
+      console.error('Error manually refreshing Firestore data:', error);
+    } finally {
+      setTimeout(() => {
+        setIsRefreshingCloud(false);
+      }, 500);
+    }
+  };
 
   // Auth Submit
   const handleAuthSubmit = async (e) => {
@@ -806,7 +869,7 @@ export default function App() {
     <div className="min-h-screen bg-[#070b14] text-slate-100 font-sans pb-16">
       {/* Top Header */}
       <header className="sticky top-0 z-30 bg-[#070b14]/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3">
-        <div className="max-w-md mx-auto sm:max-w-2xl md:max-w-4xl lg:max-w-5xl flex items-center justify-between gap-3">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center space-x-3">
             {/* Actual Amex Logo image instead of generic card symbol */}
             <img src="/logo.png" alt="Amex Logo" className="w-10 h-10 object-contain rounded-lg" />
@@ -818,230 +881,251 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2.5">
+            {/* Card Selector Buttons */}
+            <div className="flex items-center bg-[#0e1626] p-1 rounded-2xl border border-slate-800/80">
+              <button
+                onClick={() => setActiveCard('platinum')}
+                className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all text-center ${
+                  activeCard === 'platinum'
+                    ? 'bg-[#2563eb] text-white shadow-md shadow-blue-500/20'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Platinum
+              </button>
+              <button
+                onClick={() => setActiveCard('gold')}
+                className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all text-center ${
+                  activeCard === 'gold'
+                    ? 'bg-[#d97706] text-white shadow-md shadow-amber-500/20'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Gold
+              </button>
+            </div>
+
+            <button
+              onClick={handleManualRefresh}
+              disabled={isRefreshingCloud}
+              className="p-2.5 bg-[#0e1626] hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white rounded-2xl transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center"
+              title="Refresh Data from Cloud (Firestore)"
+            >
+              <RefreshCw className={`w-4.5 h-4.5 ${isRefreshingCloud ? 'animate-spin text-blue-400' : ''}`} />
+            </button>
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="p-2.5 bg-[#0e1626] hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-2xl transition-colors shadow-sm"
+              className="p-2.5 bg-[#0e1626] hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white rounded-2xl transition-colors shadow-sm"
               title="Settings"
             >
-              <Settings className="w-5 h-5" />
+              <Settings className="w-4.5 h-4.5" />
             </button>
           </div>
         </div>
       </header>
 
-      {/* Main Container */}
-      <main className="max-w-md mx-auto sm:max-w-2xl md:max-w-4xl lg:max-w-5xl px-4 pt-4 space-y-4">
-        
-        {/* Wide Card Selector Buttons */}
-        <div className="grid grid-cols-2 gap-2 bg-[#0e1626] p-1.5 rounded-2xl border border-slate-800/80">
-          <button
-            onClick={() => setActiveCard('platinum')}
-            className={`py-3 rounded-xl font-bold text-sm transition-all text-center ${
-              activeCard === 'platinum'
-                ? 'bg-[#2563eb] text-white shadow-lg shadow-blue-500/20'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Platinum
-          </button>
-          <button
-            onClick={() => setActiveCard('gold')}
-            className={`py-3 rounded-xl font-bold text-sm transition-all text-center ${
-              activeCard === 'gold'
-                ? 'bg-[#d97706] text-white shadow-lg shadow-amber-500/20'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Gold
-          </button>
-        </div>
-
-        {/* Card 1: Card Overview & Fee Breakdown */}
-        <div className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-5 space-y-4 shadow-xl">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-bold text-white">{currentCard.name}</h2>
-            <CreditCard className="w-5 h-5 text-amber-500/90" />
-          </div>
-
-          <div className="space-y-2.5 pt-1 text-sm">
-            <div className="flex items-center justify-between text-slate-400">
-              <span>Standard Annual Fee</span>
-              <span className="font-bold text-white">${cardStats.standardFee}</span>
-            </div>
-
-            {/* Interactive Corporate Credit Toggle Row */}
-            <div
-              onClick={() => toggleCorpCredit(activeCard)}
-              className="flex items-center justify-between cursor-pointer select-none py-1 hover:bg-slate-800/30 rounded-lg transition-colors px-1 -mx-1"
-              title="Click to toggle Corporate Credit"
-            >
-              <span className={`flex items-center space-x-2 font-medium transition-colors ${
-                cardStats.isCorp ? 'text-emerald-400' : 'text-slate-500'
-              }`}>
-                {cardStats.isCorp ? (
-                  <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400 flex-shrink-0" />
-                ) : (
-                  <Circle className="w-4.5 h-4.5 text-slate-600 flex-shrink-0" />
-                )}
-                <span>Corporate Credit</span>
-              </span>
-              <span className={`font-bold transition-colors ${
-                cardStats.isCorp ? 'text-emerald-400' : 'text-slate-500'
-              }`}>
-                -${cardStats.corpCreditVal}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between text-amber-400">
-              <span>Total Benefits Claimed</span>
-              <span className="font-bold">
-                -${formatAmount(cardStats.totalBenefitsClaimed).replace('$', '')}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 2: EFFECTIVE ANNUAL FEE Profit / Fee Box */}
-        <div className={`border rounded-2xl p-5 shadow-xl space-y-2 transition-all ${
-          cardStats.isProfit
-            ? 'bg-[#0a201c] border-emerald-500/30 shadow-emerald-950/20'
-            : 'bg-[#0e1626] border-slate-800/80'
-        }`}>
-          <div className="flex items-center justify-between text-xs font-bold text-slate-400 tracking-wider uppercase">
-            <span>EFFECTIVE ANNUAL FEE</span>
-            <TrendingUp className={`w-4 h-4 ${cardStats.isProfit ? 'text-emerald-400' : 'text-amber-500'}`} />
-          </div>
-
-          <div className="flex items-baseline space-x-2">
-            <span className={`text-3xl font-extrabold transition-colors ${
-              cardStats.isProfit ? 'text-emerald-400' : 'text-white'
-            }`}>
-              {formatAmount(cardStats.profitOrFeeAmount)}
-            </span>
-            <span className={`text-lg font-bold transition-colors ${
-              cardStats.isProfit ? 'text-emerald-400' : 'text-slate-400'
-            }`}>
-              {cardStats.isProfit ? 'Profit' : 'Fee'}
-            </span>
-          </div>
-        </div>
-
-        {/* Card 4: Recent Credits Section */}
-        <div className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-4 shadow-xl space-y-3">
-          <button
-            onClick={() => setIsRecentCreditsOpen(!isRecentCreditsOpen)}
-            className="w-full flex items-center justify-between text-left"
-          >
-            <h3 className="text-sm font-bold text-white">Recent Credits</h3>
-            {isRecentCreditsOpen ? (
-              <ChevronUp className="w-5 h-5 text-amber-400" />
-            ) : (
-              <ChevronDown className="w-5 h-5 text-amber-400" />
-            )}
-          </button>
-
-          {isRecentCreditsOpen && (
-            <div className="pt-2 space-y-3 border-t border-slate-800/80">
+      {/* Main Container: 2 Column Layout */}
+      <main className="max-w-7xl mx-auto px-4 pt-4 pb-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          
+          {/* Left Column: Annual Fee, Benefits Claimed, Effective Fee, Recent Credits */}
+          <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-[69px] lg:max-h-[calc(100vh-85px)] lg:overflow-y-auto lg:pr-1">
+            
+            {/* Card 1: Card Overview & Fee Breakdown */}
+            <div className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-5 space-y-4 shadow-xl">
               <div className="flex items-center justify-between">
-                <p className="text-xs text-slate-400">Plaid synced statement charges</p>
-                <button
-                  onClick={syncPlaidTransactions}
-                  disabled={!plaidToken || isSyncingPlaid}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 ${
-                    plaidToken ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                  }`}
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingPlaid ? 'animate-spin' : ''}`} />
-                  <span>Sync</span>
-                </button>
+                <h2 className="text-base font-bold text-white">{currentCard.name}</h2>
+                <CreditCard className={`w-5 h-5 ${currentCard.accent}`} />
               </div>
 
-              {recentCredits.length === 0 ? (
-                <p className="text-xs text-slate-500 text-center py-2">No recent synced credits.</p>
-              ) : (
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {recentCredits.map((credit, i) => (
-                    <div key={i} className="p-2.5 bg-[#070b14] border border-slate-800 rounded-xl flex items-center justify-between text-xs">
-                      <div>
-                        <div className="font-bold text-white">{credit.merchant}</div>
-                        <div className="text-[10px] text-slate-400">{credit.date} • {credit.benefitName}</div>
-                      </div>
-                      <div className="font-bold text-emerald-400">${credit.amount}</div>
+              <div className="space-y-2.5 pt-1 text-sm">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>Standard Annual Fee</span>
+                  <span className="font-bold text-white">${cardStats.standardFee}</span>
+                </div>
+
+                {/* Interactive Corporate Credit Toggle Row */}
+                <div
+                  onClick={() => toggleCorpCredit(activeCard)}
+                  className="flex items-center justify-between cursor-pointer select-none py-1 hover:bg-slate-800/30 rounded-lg transition-colors px-1 -mx-1"
+                  title="Click to toggle Corporate Credit"
+                >
+                  <span className={`flex items-center space-x-2 font-medium transition-colors ${
+                    cardStats.isCorp ? 'text-emerald-400' : 'text-slate-500'
+                  }`}>
+                    {cardStats.isCorp ? (
+                      <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400 flex-shrink-0" />
+                    ) : (
+                      <Circle className="w-4.5 h-4.5 text-slate-600 flex-shrink-0" />
+                    )}
+                    <span>Corporate Credit</span>
+                  </span>
+                  <span className={`font-bold transition-colors ${
+                    cardStats.isCorp ? 'text-emerald-400' : 'text-slate-500'
+                  }`}>
+                    -${cardStats.corpCreditVal}
+                  </span>
+                </div>
+
+                <div className={`flex items-center justify-between ${currentCard.accent}`}>
+                  <span>Total Benefits Claimed</span>
+                  <span className="font-bold">
+                    -${formatAmount(cardStats.totalBenefitsClaimed).replace('$', '')}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Card 2: EFFECTIVE ANNUAL FEE Profit / Fee Box */}
+            <div className={`border rounded-2xl p-5 shadow-xl space-y-2 transition-all ${
+              cardStats.isProfit
+                ? 'bg-[#0a201c] border-emerald-500/30 shadow-emerald-950/20'
+                : 'bg-[#0e1626] border-slate-800/80'
+            }`}>
+              <div className="flex items-center justify-between text-xs font-bold text-slate-400 tracking-wider uppercase">
+                <span>EFFECTIVE ANNUAL FEE</span>
+                <TrendingUp className={`w-4 h-4 ${cardStats.isProfit ? 'text-emerald-400' : currentCard.accent}`} />
+              </div>
+
+              <div className="flex items-baseline space-x-2">
+                <span className={`text-3xl font-extrabold transition-colors ${
+                  cardStats.isProfit ? 'text-emerald-400' : 'text-white'
+                }`}>
+                  {formatAmount(cardStats.profitOrFeeAmount)}
+                </span>
+                <span className={`text-lg font-bold transition-colors ${
+                  cardStats.isProfit ? 'text-emerald-400' : 'text-slate-400'
+                }`}>
+                  {cardStats.isProfit ? 'Profit' : 'Fee'}
+                </span>
+              </div>
+            </div>
+
+            {/* Card 3: Recent Credits Section */}
+            <div className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-4 shadow-xl space-y-3">
+              <button
+                onClick={() => setIsRecentCreditsOpen(!isRecentCreditsOpen)}
+                className="w-full flex items-center justify-between text-left"
+              >
+                <h3 className="text-sm font-bold text-white">Recent Credits</h3>
+                {isRecentCreditsOpen ? (
+                  <ChevronUp className={`w-5 h-5 ${currentCard.accent}`} />
+                ) : (
+                  <ChevronDown className={`w-5 h-5 ${currentCard.accent}`} />
+                )}
+              </button>
+
+              {isRecentCreditsOpen && (
+                <div className="pt-2 space-y-3 border-t border-slate-800/80">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-slate-400">Plaid synced statement charges</p>
+                    <button
+                      onClick={syncPlaidTransactions}
+                      disabled={!plaidToken || isSyncingPlaid}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 ${
+                        plaidToken ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                      }`}
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingPlaid ? 'animate-spin' : ''}`} />
+                      <span>Sync</span>
+                    </button>
+                  </div>
+
+                  {recentCredits.length === 0 ? (
+                    <p className="text-xs text-slate-500 text-center py-2">No recent synced credits.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {recentCredits.map((credit, i) => (
+                        <div key={i} className="p-2.5 bg-[#070b14] border border-slate-800 rounded-xl flex items-center justify-between text-xs">
+                          <div>
+                            <div className="font-bold text-white">{credit.merchant}</div>
+                            <div className="text-[10px] text-slate-400">{credit.date} • {credit.benefitName}</div>
+                          </div>
+                          <div className="font-bold text-emerald-400">${credit.amount}</div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
 
-        {/* Benefits Grid */}
-        <div className="space-y-3 pt-2">
-          {currentCard.benefits.map((benefit) => {
-            const usedArr = usage[benefit.id] || Array(12).fill(false);
-            const { keys, indices } = getPeriodInfo(benefit.freq);
-            
-            // Calculate total claimed for this benefit
-            let claimedVal = 0;
-            indices.forEach((mIdx) => {
-              if (usedArr[mIdx]) {
-                claimedVal += getBenefitAmount(benefit.id, mIdx);
-              }
-            });
+          </div>
 
-            const ratioText = `${formatAmount(claimedVal)} / ${formatAmount(benefit.total)}`;
+          {/* Right Column: All Credits Grid */}
+          <div className="lg:col-span-7 space-y-3 lg:max-h-[calc(100vh-85px)] lg:overflow-y-auto lg:pr-1">
+            {currentCard.benefits.map((benefit) => {
+              const usedArr = usage[benefit.id] || Array(12).fill(false);
+              const { keys, indices } = getPeriodInfo(benefit.freq);
+              
+              let claimedVal = 0;
+              indices.forEach((mIdx) => {
+                if (usedArr[mIdx]) {
+                  claimedVal += getBenefitAmount(benefit.id, mIdx);
+                }
+              });
 
-            return (
-              <div
-                key={benefit.id}
-                className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-3"
-              >
-                {/* Header Row: Title & Ratio */}
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-bold text-white text-base leading-tight">{benefit.name}</h4>
-                    <p className="text-xs text-slate-400 mt-0.5">{benefit.desc}</p>
+              const ratioText = `${formatAmount(claimedVal)} / ${formatAmount(benefit.total)}`;
+
+              return (
+                <div
+                  key={benefit.id}
+                  className="bg-[#0e1626] border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-3"
+                >
+                  {/* Header Row: Title & Ratio */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-white text-base leading-tight">{benefit.name}</h4>
+                      <p className="text-xs text-slate-400 mt-0.5">{benefit.desc}</p>
+                    </div>
+
+                    <div className="text-right">
+                      <span className={`text-base font-extrabold ${
+                        activeCard === 'platinum' ? 'text-[#60a5fa]' : 'text-[#fbbf24]'
+                      }`}>
+                        {ratioText}
+                      </span>
+                      <div className="w-12 h-0.5 ml-auto mt-0.5 rounded-full bg-slate-700" />
+                    </div>
                   </div>
 
-                  <div className="text-right">
-                    <span className={`text-base font-extrabold ${
-                      activeCard === 'platinum' ? 'text-[#60a5fa]' : 'text-[#fbbf24]'
-                    }`}>
-                      {ratioText}
-                    </span>
-                    <div className="w-12 h-0.5 ml-auto mt-0.5 rounded-full bg-slate-700" />
+                  {/* Period Buttons Grid */}
+                  <div className={`grid gap-2 ${
+                    benefit.freq === 'month'
+                      ? 'grid-cols-6'
+                      : benefit.freq === 'quart'
+                      ? 'grid-cols-4'
+                      : benefit.freq === 'semi'
+                      ? 'grid-cols-2'
+                      : 'grid-cols-1'
+                  }`}>
+                    {keys.map((label, kIdx) => {
+                      const monthIdx = indices[kIdx];
+                      const isClaimed = usedArr[monthIdx];
+
+                      return (
+                        <button
+                          key={label}
+                          onClick={() => toggleBenefit(benefit.id, monthIdx)}
+                          className={`py-3 px-2 rounded-xl text-xs font-bold transition-all text-center uppercase tracking-wide border ${
+                            isClaimed
+                              ? activeCard === 'platinum'
+                                ? 'bg-[#2563eb] border-[#3b82f6] text-white shadow-md shadow-blue-600/30'
+                                : 'bg-[#d97706] border-[#f59e0b] text-white shadow-md shadow-amber-600/30'
+                              : 'bg-[#070b14] border-slate-800 text-slate-400 hover:border-slate-700'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
+              );
+            })}
+          </div>
 
-                {/* Period Buttons Grid */}
-                <div className={`grid gap-2 ${
-                  benefit.freq === 'month' ? 'grid-cols-6' : benefit.freq === 'quart' ? 'grid-cols-4' : 'grid-cols-2'
-                }`}>
-                  {keys.map((label, kIdx) => {
-                    const monthIdx = indices[kIdx];
-                    const isClaimed = usedArr[monthIdx];
-
-                    return (
-                      <button
-                        key={label}
-                        onClick={() => toggleBenefit(benefit.id, monthIdx)}
-                        className={`py-3 px-2 rounded-xl text-xs font-bold transition-all text-center uppercase tracking-wide border ${
-                          isClaimed
-                            ? activeCard === 'platinum'
-                              ? 'bg-[#2563eb] border-[#3b82f6] text-white shadow-md shadow-blue-600/30'
-                              : 'bg-[#d97706] border-[#f59e0b] text-white shadow-md shadow-amber-600/30'
-                            : 'bg-[#070b14] border-slate-800 text-slate-400 hover:border-slate-700'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
         </div>
       </main>
 
