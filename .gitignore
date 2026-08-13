@@ -20,3 +20,4 @@ google-services.json
 cloudflare-worker/.dev.vars
 cloudflare-worker/.dev.vars.local
 !cloudflare-worker/.dev.vars.example
+cloudflare-worker/.wrangler/

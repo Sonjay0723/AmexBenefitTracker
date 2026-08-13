@@ -13,7 +13,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
 /**
- * Talks to the Cloudflare Plaid broker's authenticated /plaid/* routes.
+ * Talks to the Cloudflare Plaid broker's authenticated /plaid/... routes.
  *
  * As of the worker's KV-backed auth rework, the worker is the sole holder of
  * the Plaid access token, sync cursor, and card-to-account mappings, keyed
