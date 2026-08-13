@@ -140,7 +140,12 @@ class DashboardViewModel(
     private suspend fun migrateLegacyPlaidDataIfNeeded() {
         val legacyToken = plaidManager.getLegacyAccessToken() ?: return
         try {
-            val legacyMappings = cards.value
+            // Read a fresh list directly from the repository rather than the
+            // cached `cards` StateFlow, which can still be at its empty
+            // initial value this early (e.g. on a cold start, before
+            // anything has collected it yet) - that would silently migrate
+            // the access token but drop every legacy card mapping.
+            val legacyMappings = repository.getAllCards().first()
                 .associate { card -> card.name.toSlug() to (plaidManager.getLegacyCardMapping(card.id) ?: "") }
                 .filterValues { it.isNotBlank() }
             plaidManager.migrate(legacyToken, legacyMappings)
