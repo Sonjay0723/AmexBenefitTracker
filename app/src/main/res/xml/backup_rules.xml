@@ -6,8 +6,10 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- plaid_prefs can transiently hold a legacy Plaid access token until
+         PlaidManager's one-time /plaid/migrate migration clears it (see
+         DashboardViewModel.migrateLegacyPlaidDataIfNeeded). Auto Backup can
+         run before that migration completes, so exclude it outright rather
+         than relying on timing to keep a credential out of backups. -->
+    <exclude domain="sharedpref" path="plaid_prefs.xml"/>
 </full-backup-content>

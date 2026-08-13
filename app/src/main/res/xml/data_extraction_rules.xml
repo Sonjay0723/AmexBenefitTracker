@@ -5,15 +5,12 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- plaid_prefs can transiently hold a legacy Plaid access token
+             until the one-time /plaid/migrate migration clears it - see
+             backup_rules.xml for the full rationale. -->
+        <exclude domain="sharedpref" path="plaid_prefs.xml"/>
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="plaid_prefs.xml"/>
     </device-transfer>
-    -->
 </data-extraction-rules>

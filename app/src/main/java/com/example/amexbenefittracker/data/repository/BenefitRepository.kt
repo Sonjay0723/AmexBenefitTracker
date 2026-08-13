@@ -10,10 +10,12 @@ import com.example.amexbenefittracker.data.local.entities.UsageHistory
 import com.example.amexbenefittracker.domain.model.CardSummary
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import com.example.amexbenefittracker.data.local.dao.TransactionDao
 import com.example.amexbenefittracker.data.local.entities.Transaction
 import com.example.amexbenefittracker.data.remote.PlaidTransaction
 import com.example.amexbenefittracker.data.remote.PlaidManager
+import com.example.amexbenefittracker.util.toSlug
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -346,18 +348,15 @@ class BenefitRepository(
             data["claims"] = claims
 
             android.util.Log.d("BenefitRepository", "Syncing data to Firestore claims map: $claims")
-            firestore.collection("users").document(userId).set(data).await()
+            // merge() is required here: an unmerged set() would overwrite the
+            // whole users/{uid} document, wiping fields only the other
+            // client writes (recent_credits, the worker-held plaid state,
+            // etc.) every time this device pushes a claim toggle.
+            firestore.collection("users").document(userId).set(data, SetOptions.merge()).await()
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
-
-    private fun String.toSlug() = lowercase()
-        .replace("®", "")
-        .replace("'", "")
-        .replace("+", "plus")
-        .replace(Regex("[^a-z0-9]+"), "_")
-        .trim('_')
 
     suspend fun insertCard(card: Card): Long = cardDao.insertCard(card)
     suspend fun insertBenefit(benefit: Benefit): Long = benefitDao.insertBenefit(benefit)
@@ -384,7 +383,7 @@ class BenefitRepository(
         val localTransactions = mutableListOf<Transaction>()
 
         for (pt in plaidTransactions) {
-            val cardId = plaidManager.getCardIdForPlaidAccount(pt.accountId) ?: 0L
+            val cardId = plaidManager.getCardIdForPlaidAccount(pt.accountId, cards) ?: 0L
             val dateMillis = parsePlaidDate(pt.date)
             val txName = pt.originalDescription ?: pt.name
 

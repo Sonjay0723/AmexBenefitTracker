@@ -57,6 +57,7 @@ import com.example.amexbenefittracker.data.remote.PlaidAccount
 import com.example.amexbenefittracker.domain.model.CardSummary
 import com.example.amexbenefittracker.ui.auth.AuthViewModel
 import com.example.amexbenefittracker.ui.theme.*
+import com.example.amexbenefittracker.util.toSlug
 import java.util.*
 import androidx.compose.material.icons.filled.FlashOn
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -77,6 +78,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
     val trackingYear by viewModel.trackingYear.collectAsState()
     val currentUser by authViewModel.currentUser.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val plaidConnected by viewModel.plaidConnected.collectAsState()
     val focusManager = LocalFocusManager.current
 
     if (android.os.Build.VERSION.SDK_INT >= 33) {
@@ -389,7 +391,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                     // Plaid Sync Settings Option Card
                     Surface(
                         onClick = {
-                            if (viewModel.plaidManager.hasAccessToken()) {
+                            if (plaidConnected) {
                                 showPlaidSettingsDialog = true
                             } else {
                                 viewModel.getLinkToken { linkToken ->
@@ -1137,15 +1139,13 @@ fun PlaidSettingsDialog(
     plaidLauncher: androidx.activity.result.ActivityResultLauncher<com.plaid.link.configuration.LinkTokenConfiguration>,
     onDismiss: () -> Unit
 ) {
-    val plaidManager = viewModel.plaidManager
     val plaidAccounts by viewModel.plaidAccounts.collectAsState()
+    val cardMappings by viewModel.cardMappings.collectAsState()
     val plaidError by viewModel.plaidError.collectAsState()
     val cards by viewModel.cards.collectAsState()
-    
+
     LaunchedEffect(Unit) {
-        if (plaidManager.hasAccessToken()) {
-            viewModel.fetchPlaidAccounts(plaidManager.getAccessToken()!!)
-        }
+        viewModel.refreshPlaidStatus()
     }
     
     AlertDialog(
@@ -1224,7 +1224,7 @@ fun PlaidSettingsDialog(
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     
-                                    val mappedId = plaidManager.getCardMapping(card.id)
+                                    val mappedId = cardMappings[card.name.toSlug()]
                                     val selectedAccount = plaidAccounts.find { it.accountId == mappedId }
                                     val selectorText = selectedAccount?.let {
                                         "${it.name} (ending in ${it.mask ?: "xxxx"})"
@@ -1278,7 +1278,7 @@ fun PlaidSettingsDialog(
                         
                         Button(
                             onClick = {
-                                plaidManager.clearAll()
+                                viewModel.disconnectPlaid()
                                 onDismiss()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Red400),
