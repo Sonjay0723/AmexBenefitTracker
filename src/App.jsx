@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   CreditCard,
   TrendingUp,
@@ -38,7 +38,7 @@ import {
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, deleteField } from 'firebase/firestore';
 
 const MONTH_ABBRS = [
   'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
@@ -46,6 +46,14 @@ const MONTH_ABBRS = [
 ];
 
 const DEFAULT_PLAID_WORKER_URL = 'https://amex-plaid-broker.jpitta0723.workers.dev';
+
+// The stable card identifiers shared with Firestore claim keys and with the
+// Plaid broker's card_mappings (which are keyed by these slugs, not by the
+// app's internal 'platinum'/'gold' card keys).
+const CARD_SLUGS = {
+  platinum: 'the_platinum_card',
+  gold: 'american_express_gold_card'
+};
 
 const INITIAL_DATA = {
   platinum: {
@@ -197,14 +205,9 @@ const deserializeClaims = (claims, year) => {
   });
   if (!claims) return { usage, timestamps };
 
-  const cardMapping = {
-    platinum: 'the_platinum_card',
-    gold: 'american_express_gold_card'
-  };
-
   Object.entries(BENEFIT_MAP).forEach(([benefitId, { card, path, freq }]) => {
     const { keys, indices } = getPeriodInfo(freq);
-    
+
     keys.forEach((key, kIdx) => {
       const monthIdx = indices[kIdx];
       let claim = null;
@@ -213,11 +216,11 @@ const deserializeClaims = (claims, year) => {
 
       for (const fKey of candidateKeys) {
         if (path === 'uber_cash') {
-          const platClaims = claims['the_platinum_card']?.[year]?.['uber_cash']?.[fKey];
-          const goldClaims = claims['american_express_gold_card']?.[year]?.['uber_cash']?.[fKey];
+          const platClaims = claims[CARD_SLUGS.platinum]?.[year]?.['uber_cash']?.[fKey];
+          const goldClaims = claims[CARD_SLUGS.gold]?.[year]?.['uber_cash']?.[fKey];
           claim = platClaims || goldClaims;
         } else {
-          const firestoreCardKey = cardMapping[card];
+          const firestoreCardKey = CARD_SLUGS[card];
           claim = claims[firestoreCardKey]?.[year]?.[path]?.[fKey];
         }
         if (claim) break;
@@ -234,11 +237,6 @@ const deserializeClaims = (claims, year) => {
 
 const serializeClaims = (usage, timestamps, year) => {
   const claims = {};
-
-  const cardMapping = {
-    platinum: 'the_platinum_card',
-    gold: 'american_express_gold_card'
-  };
 
   const processedUberCashPeriods = new Set();
 
@@ -265,7 +263,7 @@ const serializeClaims = (usage, timestamps, year) => {
           processedUberCashPeriods.add(periodIdentifier);
         }
 
-        const firestoreCardKey = cardMapping[card];
+        const firestoreCardKey = CARD_SLUGS[card];
         if (!claims[firestoreCardKey]) claims[firestoreCardKey] = {};
         if (!claims[firestoreCardKey][year]) claims[firestoreCardKey][year] = {};
         const cardClaims = claims[firestoreCardKey][year];
@@ -297,15 +295,17 @@ export default function App() {
     gold: { enabled: true }
   });
 
-  // Plaid state
-  const [plaidToken, setPlaidToken] = useState(null);
+  // Plaid state - the access token and sync cursor live only in the
+  // Cloudflare Worker's KV store now, keyed by Firebase uid, so every
+  // signed-in device shares one connection instead of linking separately.
+  const [plaidConnected, setPlaidConnected] = useState(false);
   const [plaidAccounts, setPlaidAccounts] = useState([]);
   const [cardPlaidMappings, setCardPlaidMappings] = useState({ platinum: '', gold: '' });
-  const [syncCursor, setSyncCursor] = useState(null);
   const [recentCredits, setRecentCredits] = useState([]);
   const [isSyncingPlaid, setIsSyncingPlaid] = useState(false);
   const [isRecentCreditsOpen, setIsRecentCreditsOpen] = useState(false);
   const [isRefreshingCloud, setIsRefreshingCloud] = useState(false);
+  const migratedLegacyPlaidRef = useRef(false);
 
   // Modals state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -325,9 +325,71 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setAuthLoading(false);
+      if (!u) {
+        setPlaidConnected(false);
+        setPlaidAccounts([]);
+      }
     });
     return () => unsubscribe();
   }, []);
+
+  // Attaches a verified Firebase ID token to every Plaid broker call. The
+  // worker derives the caller's uid from this token - it no longer accepts
+  // a client-supplied userId or accessToken.
+  const authedFetch = async (method, path, body) => {
+    const idToken = await user.getIdToken();
+    const res = await fetch(`${DEFAULT_PLAID_WORKER_URL}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Plaid broker request failed (${res.status})`);
+    }
+    return data;
+  };
+
+  const translateCardMappings = (slugMappings = {}) => ({
+    platinum: slugMappings[CARD_SLUGS.platinum] || '',
+    gold: slugMappings[CARD_SLUGS.gold] || ''
+  });
+
+  // Pulls the account's Plaid connection state from the broker. This is the
+  // single source of truth for "connected" now - unlike the access token
+  // itself, it's cheap and safe to ask for on every device.
+  const refreshPlaidStatus = async () => {
+    if (!user) return;
+    try {
+      const data = await authedFetch('GET', '/plaid/status');
+      setPlaidConnected(!!data.connected);
+      setPlaidAccounts(data.accounts || []);
+      setCardPlaidMappings(translateCardMappings(data.card_mappings));
+    } catch (err) {
+      console.error('Error fetching Plaid status:', err);
+    }
+  };
+
+  // One-time import of a Plaid connection a pre-update client still holds
+  // in Firestore. Runs at most once per session (migratedLegacyPlaidRef);
+  // the worker's /plaid/migrate is itself insert-only, so this is also safe
+  // to run again in a future session if the field somehow wasn't cleared.
+  const migrateLegacyPlaidToken = async (legacyPlaidTokens) => {
+    try {
+      await authedFetch('POST', '/plaid/migrate', {
+        accessToken: legacyPlaidTokens.access_token,
+        card_mappings: legacyPlaidTokens.card_mappings || {}
+      });
+      const userDocRef = doc(db, 'users', user.uid);
+      await updateDoc(userDocRef, { plaid_tokens: deleteField() });
+      await refreshPlaidStatus();
+    } catch (err) {
+      console.error('Error migrating legacy Plaid connection:', err);
+    }
+  };
 
   // 2. Firebase Firestore real-time snapshot listener
   useEffect(() => {
@@ -337,7 +399,7 @@ export default function App() {
     const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        
+
         const remoteYear = data.tracking_year || currentSystemYear;
         setTrackingYear(remoteYear);
 
@@ -352,16 +414,13 @@ export default function App() {
           setCorpCreditSettings(data.corp_credits);
         }
 
-        if (data.plaid_tokens) {
-          setPlaidToken(data.plaid_tokens.access_token || null);
-          setSyncCursor(data.plaid_tokens.sync_cursor || null);
-          if (data.plaid_tokens.card_mappings) {
-            setCardPlaidMappings(data.plaid_tokens.card_mappings);
-          }
-        }
-
         if (Array.isArray(data.recent_credits)) {
           setRecentCredits(data.recent_credits);
+        }
+
+        if (data.plaid_tokens?.access_token && !migratedLegacyPlaidRef.current) {
+          migratedLegacyPlaidRef.current = true;
+          migrateLegacyPlaidToken(data.plaid_tokens);
         }
       } else {
         const initialDoc = {
@@ -377,6 +436,18 @@ export default function App() {
     });
 
     return () => unsubscribe();
+  }, [user]);
+
+  // 2b. Plaid connection status - lives in the broker's KV store, not
+  // Firestore, so it's fetched separately rather than via onSnapshot.
+  // (Reset on sign-out happens in the auth listener above instead of here,
+  // to avoid calling setState synchronously in this effect's body.)
+  useEffect(() => {
+    if (!user) return;
+    // Fetch-on-mount: refreshPlaidStatus's setState calls run after the
+    // await inside it resolves, not synchronously in this effect body.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refreshPlaidStatus();
   }, [user]);
 
   // 3. Manual Firestore Refresh Handler
@@ -402,18 +473,11 @@ export default function App() {
           setCorpCreditSettings(data.corp_credits);
         }
 
-        if (data.plaid_tokens) {
-          setPlaidToken(data.plaid_tokens.access_token || null);
-          setSyncCursor(data.plaid_tokens.sync_cursor || null);
-          if (data.plaid_tokens.card_mappings) {
-            setCardPlaidMappings(data.plaid_tokens.card_mappings);
-          }
-        }
-
         if (Array.isArray(data.recent_credits)) {
           setRecentCredits(data.recent_credits);
         }
       }
+      await refreshPlaidStatus();
     } catch (error) {
       console.error('Error manually refreshing Firestore data:', error);
     } finally {
@@ -540,16 +604,13 @@ export default function App() {
     }
   };
 
-  // Plaid Integration
+  // Plaid Integration - every call carries the caller's Firebase ID token
+  // (see authedFetch above); the broker resolves that to a Plaid connection
+  // in its own KV store, so it never needs an access token from us.
   const launchPlaidLink = async () => {
     setPlaidError(null);
     try {
-      const res = await fetch(`${DEFAULT_PLAID_WORKER_URL}/create-link-token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.uid })
-      });
-      const data = await res.json();
+      const data = await authedFetch('POST', '/plaid/link-token');
       if (!data.link_token) {
         throw new Error(data.error || 'Failed to generate link token');
       }
@@ -572,82 +633,33 @@ export default function App() {
 
   const exchangePlaidPublicToken = async (publicToken) => {
     try {
-      const res = await fetch(`${DEFAULT_PLAID_WORKER_URL}/exchange-token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ publicToken })
-      });
-      const data = await res.json();
-      if (!data.access_token) {
-        throw new Error(data.error || 'Token exchange failed');
-      }
-      setPlaidToken(data.access_token);
-
-      const userDocRef = doc(db, 'users', user.uid);
-      await setDoc(userDocRef, {
-        plaid_tokens: {
-          access_token: data.access_token,
-          sync_cursor: null,
-          card_mappings: cardPlaidMappings
-        }
-      }, { merge: true });
-
-      await fetchPlaidAccounts(data.access_token);
+      await authedFetch('POST', '/plaid/exchange', { publicToken });
+      await refreshPlaidStatus();
     } catch (err) {
       setPlaidError(err.message);
     }
   };
 
-  const fetchPlaidAccounts = async (accessToken) => {
-    try {
-      const res = await fetch(`${DEFAULT_PLAID_WORKER_URL}/accounts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken })
-      });
-      const data = await res.json();
-      if (data.accounts) {
-        setPlaidAccounts(data.accounts);
-      }
-    } catch (err) {
-      console.error('Error fetching Plaid accounts:', err);
-    }
-  };
-
   const mapCardToPlaid = async (cardKey, plaidAccountId) => {
-    const updated = { ...cardPlaidMappings, [cardKey]: plaidAccountId };
-    setCardPlaidMappings(updated);
     if (!user) return;
     try {
-      const userDocRef = doc(db, 'users', user.uid);
-      await setDoc(userDocRef, {
-        plaid_tokens: {
-          access_token: plaidToken,
-          sync_cursor: syncCursor,
-          card_mappings: updated
-        }
-      }, { merge: true });
+      const data = await authedFetch('POST', '/plaid/mappings', {
+        card_mappings: { [CARD_SLUGS[cardKey]]: plaidAccountId }
+      });
+      setCardPlaidMappings(translateCardMappings(data.card_mappings));
     } catch (e) {
       console.error('Error saving card mapping:', e);
     }
   };
 
   const syncPlaidTransactions = async () => {
-    if (!plaidToken || !user) return;
+    if (!plaidConnected || !user) return;
     setIsSyncingPlaid(true);
     setPlaidError(null);
 
     try {
-      const res = await fetch(`${DEFAULT_PLAID_WORKER_URL}/sync-transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken: plaidToken, cursor: syncCursor })
-      });
-      const data = await res.json();
-      
-      const newAdded = data.added || [];
-      const nextCursor = data.next_cursor || data.nextCursor || syncCursor;
-      setSyncCursor(nextCursor);
+      const { added, from_cursor, next_cursor } = await authedFetch('POST', '/plaid/sync');
+      const newAdded = added || [];
 
       const matchedList = [...recentCredits];
       const newUsage = { ...usage };
@@ -700,14 +712,15 @@ export default function App() {
       const userDocRef = doc(db, 'users', user.uid);
       await setDoc(userDocRef, {
         claims: serialized,
-        recent_credits: uniqueMatched.slice(0, 20),
-        plaid_tokens: {
-          access_token: plaidToken,
-          sync_cursor: nextCursor,
-          card_mappings: cardPlaidMappings
-        }
+        recent_credits: uniqueMatched.slice(0, 20)
       }, { merge: true });
 
+      // Only commit the cursor once the claims it produced are safely
+      // persisted - Plaid's cursor is destructive-on-advance, so committing
+      // it first and then failing the write above would lose transactions
+      // permanently. fromCursor lets the broker detect and reject a commit
+      // if another device already advanced the cursor first.
+      await authedFetch('POST', '/plaid/cursor', { cursor: next_cursor, fromCursor: from_cursor });
     } catch (err) {
       setPlaidError(err.message);
     } finally {
@@ -1022,9 +1035,9 @@ export default function App() {
                     <p className="text-xs text-slate-400">Plaid synced statement charges</p>
                     <button
                       onClick={syncPlaidTransactions}
-                      disabled={!plaidToken || isSyncingPlaid}
+                      disabled={!plaidConnected || isSyncingPlaid}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 ${
-                        plaidToken ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        plaidConnected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                       }`}
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${isSyncingPlaid ? 'animate-spin' : ''}`} />
@@ -1193,32 +1206,42 @@ export default function App() {
                   className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition-all"
                 >
                   <Link2 className="w-4 h-4" />
-                  <span>{plaidToken ? 'Relink Accounts via Plaid' : 'Connect Amex via Plaid'}</span>
+                  <span>{plaidConnected ? 'Relink Accounts via Plaid' : 'Connect Amex via Plaid'}</span>
                 </button>
 
-                {plaidToken && (
+                {plaidConnected && (
                   <div className="pt-2 space-y-2 border-t border-slate-800 text-xs">
                     <label className="block text-[11px] font-bold text-slate-400">Card Mappings</label>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <span className="text-[10px] text-slate-400 block mb-1">Platinum Account ID</span>
-                        <input
-                          type="text"
-                          placeholder="Plaid Account ID"
+                        <span className="text-[10px] text-slate-400 block mb-1">Platinum Account</span>
+                        <select
                           value={cardPlaidMappings.platinum || ''}
                           onChange={(e) => mapCardToPlaid('platinum', e.target.value)}
                           className="w-full px-2.5 py-1.5 bg-[#0e1626] border border-slate-800 rounded-xl text-slate-200 text-xs"
-                        />
+                        >
+                          <option value="">None</option>
+                          {plaidAccounts.map((acc) => (
+                            <option key={acc.account_id} value={acc.account_id}>
+                              {acc.name} (…{acc.mask})
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <div>
-                        <span className="text-[10px] text-slate-400 block mb-1">Gold Account ID</span>
-                        <input
-                          type="text"
-                          placeholder="Plaid Account ID"
+                        <span className="text-[10px] text-slate-400 block mb-1">Gold Account</span>
+                        <select
                           value={cardPlaidMappings.gold || ''}
                           onChange={(e) => mapCardToPlaid('gold', e.target.value)}
                           className="w-full px-2.5 py-1.5 bg-[#0e1626] border border-slate-800 rounded-xl text-slate-200 text-xs"
-                        />
+                        >
+                          <option value="">None</option>
+                          {plaidAccounts.map((acc) => (
+                            <option key={acc.account_id} value={acc.account_id}>
+                              {acc.name} (…{acc.mask})
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                   </div>

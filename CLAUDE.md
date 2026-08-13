@@ -38,8 +38,10 @@ The in-memory model and the Firestore model are deliberately different, and `BEN
 
 ```
 claims[<the_platinum_card|american_express_gold_card>][<year>][<benefit_path>][<periodKey>] = { a: amount, d: epochMillis }
-tracking_year, corp_credits, plaid_tokens, recent_credits
+tracking_year, corp_credits, recent_credits
 ```
+
+`plaid_tokens` used to live here too but no longer should — see the Plaid section below. New code should never write to it.
 
 `serializeClaims` writes **canonical** period keys (`"01".."12"`, `"Annual"`, `"Q1".."Q4"`, `"H1"/"H2"`), while `deserializeClaims` reads **leniently** via `getPossibleFirestorePeriodKeys`, which also accepts unpadded months and `JAN`-style abbreviations written by older clients and the Android app. Preserve that write-strict/read-tolerant asymmetry when touching key formats — dropping a legacy key silently loses users' historical claims.
 
@@ -59,7 +61,11 @@ An `onSnapshot` listener keeps state live; every toggle also fires an immediate 
 
 ### Plaid
 
-No backend lives in this branch. All Plaid calls go to a Cloudflare Worker at `DEFAULT_PLAID_WORKER_URL` (`https://amex-plaid-broker.jpitta0723.workers.dev`) via `/create-link-token`, `/exchange-token`, `/accounts`, `/sync-transactions`. The Plaid Link SDK is loaded by a `<script>` tag in `index.html` and reached as `window.Plaid` (the `cloudflare-worker/` directory is empty here).
+No backend lives in this branch. All Plaid calls go to a Cloudflare Worker at `DEFAULT_PLAID_WORKER_URL` (`https://amex-plaid-broker.jpitta0723.workers.dev`) via `authedFetch`, which attaches `Authorization: Bearer <firebase_id_token>` to every call — the worker resolves that to a Plaid connection in its own KV store (see the worker's source on `android_cloudflare_auth`/`android_main`), so the client never holds a Plaid access token at all. Routes: `/plaid/link-token`, `/plaid/exchange`, `/plaid/status`, `/plaid/accounts`, `/plaid/sync`, `/plaid/cursor`, `/plaid/mappings`, `/plaid/disconnect`, `/plaid/migrate`. This is what makes a Plaid connection linked on one device (web or Android) available on every device signed into the same Firebase account.
+
+`/plaid/sync` does not commit its own cursor — it returns `next_cursor`, and the client only calls `/plaid/cursor` after the resulting claims are successfully written to Firestore (Plaid's cursor is destructive-on-advance, so committing it before the write is confirmed would risk losing transactions permanently). `plaid_tokens` in Firestore is legacy: `onSnapshot`'s handler checks for it once per session and, if present, migrates it to the worker via `/plaid/migrate` then deletes the field — new code should never write to `plaid_tokens`.
+
+The Plaid Link SDK is loaded by a `<script>` tag in `index.html` and reached as `window.Plaid` (the `cloudflare-worker/` directory is empty here).
 
 `matchTransactionToBenefit` matches merchant strings against a `switch` keyed on the benefit's **display `name`**, not its id — renaming a benefit in `INITIAL_DATA` silently breaks its transaction matching unless the `case` label is renamed too.
 
