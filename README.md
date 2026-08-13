@@ -56,24 +56,29 @@ Follow these step-by-step instructions to set up your own Plaid developer accoun
 
 ### Step 2: Deploy the Cloudflare Worker Broker (100% Free)
 
-To protect your Plaid credentials, the app routes Plaid API requests through a secure Cloudflare Worker located in `./cloudflare-worker`.
+To protect your Plaid credentials, the app routes Plaid API requests through a secure Cloudflare Worker located in `./cloudflare-worker`. The worker also verifies each caller's Firebase ID token before touching Plaid or Cloudflare KV, so a connection linked on one device is available on every device signed into the same account — the worker itself is the only place a Plaid access token is ever stored.
 
-#### Option A: Using Cloudflare Web Dashboard
-1. Log into your [Cloudflare Dashboard](https://dash.cloudflare.com/).
-2. Go to **Workers & Pages** -> Click **Create Application** -> **Create Worker**.
-3. Name your Worker (e.g., `amex-plaid-broker`) and click **Deploy**.
-4. Click **Edit Code**, replace the contents of `worker.js` with the code in `./cloudflare-worker/worker.js`, and click **Deploy**.
-5. Go to **Settings** -> **Variables & Secrets**, add secret variables `PLAID_CLIENT_ID`, `PLAID_SECRET`, and `PLAID_ENV` (`sandbox` or `production`), and save.
+1. Create the KV namespace the worker uses to store each user's Plaid connection:
+   ```bash
+   cd cloudflare-worker
+   npx wrangler login
+   npx wrangler kv namespace create PLAID_KV
+   npx wrangler kv namespace create PLAID_KV --preview
+   ```
+   Copy the two ids the commands print into `id` / `preview_id` in `wrangler.jsonc`'s `kv_namespaces` entry.
+2. In `wrangler.jsonc`, set `vars.FIREBASE_PROJECT_ID` to your own Firebase project id (from Step 3 below) — this is what the worker checks incoming ID tokens against. If you deploy the worker at a different origin than `http://localhost:5173`, or serve the Electron app somewhere other than `file://`, also update `vars.ALLOWED_ORIGINS` (comma-separated).
+3. Set the Plaid secrets and deploy:
+   ```bash
+   npx wrangler secret put PLAID_CLIENT_ID
+   npx wrangler secret put PLAID_SECRET
+   npx wrangler secret put PLAID_ENV
+   npx wrangler deploy
+   ```
+   For local testing, copy `cloudflare-worker/.dev.vars.example` to `cloudflare-worker/.dev.vars` (gitignored) and run `npx wrangler dev`.
 
-#### Option B: Using Wrangler CLI
-```bash
-cd cloudflare-worker
-npx wrangler login
-npx wrangler secret put PLAID_CLIENT_ID
-npx wrangler secret put PLAID_SECRET
-npx wrangler secret put PLAID_ENV
-npx wrangler deploy
-```
+The Cloudflare Web Dashboard works too (**Workers & Pages → Create Application → Create Worker**, paste in `worker.js` and `auth.js`, add the KV binding and vars under **Settings**), but the CLI is easier to keep in sync with `wrangler.jsonc`.
+
+A handful of legacy, unauthenticated routes (`/create-link-token`, `/exchange-token`, `/accounts`, `/sync-transactions`) are still served for clients that haven't updated yet. They're planned for removal — don't build anything new against them.
 
 ---
 

@@ -15,3 +15,8 @@
 local.properties
 /app/google-services.json
 google-services.json
+
+# Cloudflare Worker local secrets (wrangler dev)
+cloudflare-worker/.dev.vars
+cloudflare-worker/.dev.vars.local
+!cloudflare-worker/.dev.vars.example
