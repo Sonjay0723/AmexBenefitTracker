@@ -9,6 +9,9 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions ORDER BY date DESC")
     fun getAllTransactions(): Flow<List<Transaction>>
 
+    @Query("SELECT * FROM transactions ORDER BY date DESC")
+    suspend fun getAllTransactionsDirect(): List<Transaction>
+
     @Query("SELECT * FROM transactions WHERE cardId = :cardId ORDER BY date DESC")
     fun getTransactionsForCard(cardId: Long): Flow<List<Transaction>>
 

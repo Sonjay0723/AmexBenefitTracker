@@ -2,12 +2,17 @@ package com.example.amexbenefittracker.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import com.example.amexbenefittracker.data.remote.PlaidManager
 import com.example.amexbenefittracker.data.repository.AuthRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
+class AuthViewModel(
+    private val authRepository: AuthRepository,
+    private val plaidManager: PlaidManager
+) : ViewModel() {
 
     val currentUser = authRepository.currentUser
 
@@ -18,6 +23,11 @@ class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
     val errorMessage = _errorMessage.asStateFlow()
 
     fun signOut() {
+        // Plaid's access token now lives only in the worker's KV store, but
+        // clear whatever local UI cache remains (connected flag, mapping
+        // cache) so the next account signed into this device doesn't
+        // briefly see the previous user's Plaid state.
+        plaidManager.clearLocalState()
         authRepository.signOut()
     }
 
@@ -46,7 +56,8 @@ class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
                                         "email" to email,
                                         "createdAt" to System.currentTimeMillis()
                                     )
-                                    FirebaseFirestore.getInstance().collection("users").document(uid).set(userMap)
+                                    FirebaseFirestore.getInstance().collection("users").document(uid)
+                                        .set(userMap, SetOptions.merge())
                                 }
                                 // If exists or created, AuthRepository's StateFlow will update the UI
                             } else {
@@ -76,7 +87,8 @@ class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
                         "createdAt" to System.currentTimeMillis()
                     )
                     
-                    FirebaseFirestore.getInstance().collection("users").document(uid).set(userMap)
+                    FirebaseFirestore.getInstance().collection("users").document(uid)
+                        .set(userMap, SetOptions.merge())
                         .addOnCompleteListener { dbTask ->
                             _isLoading.value = false
                             if (!dbTask.isSuccessful) {
@@ -90,11 +102,14 @@ class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
             }
     }
 
-    class Factory(private val authRepository: AuthRepository) : ViewModelProvider.Factory {
+    class Factory(
+        private val authRepository: AuthRepository,
+        private val plaidManager: PlaidManager
+    ) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(AuthViewModel::class.java)) {
                 @Suppress("UNCHECKED_CAST")
-                return AuthViewModel(authRepository) as T
+                return AuthViewModel(authRepository, plaidManager) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class")
         }

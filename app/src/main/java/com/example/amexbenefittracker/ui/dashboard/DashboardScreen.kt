@@ -57,10 +57,15 @@ import com.example.amexbenefittracker.data.remote.PlaidAccount
 import com.example.amexbenefittracker.domain.model.CardSummary
 import com.example.amexbenefittracker.ui.auth.AuthViewModel
 import com.example.amexbenefittracker.ui.theme.*
+import com.example.amexbenefittracker.util.toSlug
 import java.util.*
+import androidx.compose.material.icons.filled.FlashOn
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import com.example.amexbenefittracker.ui.offers.CardIssuer
+import com.example.amexbenefittracker.ui.offers.IssuerSelectionDialog
+import com.example.amexbenefittracker.ui.offers.AmexOfferWebViewScreen
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
@@ -73,6 +78,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
     val trackingYear by viewModel.trackingYear.collectAsState()
     val currentUser by authViewModel.currentUser.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val plaidConnected by viewModel.plaidConnected.collectAsState()
     val focusManager = LocalFocusManager.current
 
     if (android.os.Build.VERSION.SDK_INT >= 33) {
@@ -141,6 +147,26 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
             viewModel = viewModel,
             plaidLauncher = plaidLauncher,
             onDismiss = { showPlaidSettingsDialog = false }
+        )
+    }
+
+    var showIssuerDialog by remember { mutableStateOf(false) }
+    var activeOfferIssuer by remember { mutableStateOf<CardIssuer?>(null) }
+
+    if (showIssuerDialog) {
+        IssuerSelectionDialog(
+            onDismissRequest = { showIssuerDialog = false },
+            onIssuerSelected = { issuer ->
+                showIssuerDialog = false
+                activeOfferIssuer = issuer
+            }
+        )
+    }
+
+    activeOfferIssuer?.let { issuer ->
+        AmexOfferWebViewScreen(
+            issuer = issuer,
+            onDismiss = { activeOfferIssuer = null }
         )
     }
 
@@ -365,7 +391,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                     // Plaid Sync Settings Option Card
                     Surface(
                         onClick = {
-                            if (viewModel.plaidManager.hasAccessToken()) {
+                            if (plaidConnected) {
                                 showPlaidSettingsDialog = true
                             } else {
                                 viewModel.getLinkToken { linkToken ->
@@ -402,6 +428,46 @@ fun DashboardScreen(viewModel: DashboardViewModel, authViewModel: AuthViewModel)
                                 )
                                 Text(
                                     text = "Link Amex Accounts",
+                                    color = Slate400,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Auto-Activate Offers Option Card
+                    Surface(
+                        onClick = {
+                            showIssuerDialog = true
+                            showSettingsPanel = false
+                        },
+                        color = Slate900,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Slate800),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FlashOn,
+                                contentDescription = "Auto-Activate Offers",
+                                tint = Slate400,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text(
+                                    text = "Auto-Activate Offers",
+                                    color = TextWhite,
+                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Text(
+                                    text = "Automate card offer activations",
                                     color = Slate400,
                                     style = MaterialTheme.typography.bodyMedium
                                 )
@@ -1073,15 +1139,13 @@ fun PlaidSettingsDialog(
     plaidLauncher: androidx.activity.result.ActivityResultLauncher<com.plaid.link.configuration.LinkTokenConfiguration>,
     onDismiss: () -> Unit
 ) {
-    val plaidManager = viewModel.plaidManager
     val plaidAccounts by viewModel.plaidAccounts.collectAsState()
+    val cardMappings by viewModel.cardMappings.collectAsState()
     val plaidError by viewModel.plaidError.collectAsState()
     val cards by viewModel.cards.collectAsState()
-    
+
     LaunchedEffect(Unit) {
-        if (plaidManager.hasAccessToken()) {
-            viewModel.fetchPlaidAccounts(plaidManager.getAccessToken()!!)
-        }
+        viewModel.refreshPlaidStatus()
     }
     
     AlertDialog(
@@ -1160,7 +1224,7 @@ fun PlaidSettingsDialog(
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     
-                                    val mappedId = plaidManager.getCardMapping(card.id)
+                                    val mappedId = cardMappings[card.name.toSlug()]
                                     val selectedAccount = plaidAccounts.find { it.accountId == mappedId }
                                     val selectorText = selectedAccount?.let {
                                         "${it.name} (ending in ${it.mask ?: "xxxx"})"
@@ -1214,7 +1278,7 @@ fun PlaidSettingsDialog(
                         
                         Button(
                             onClick = {
-                                plaidManager.clearAll()
+                                viewModel.disconnectPlaid()
                                 onDismiss()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Red400),

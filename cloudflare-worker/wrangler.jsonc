@@ -5,5 +5,16 @@
   "compatibility_date": "2024-03-01",
   "observability": {
     "enabled": true
-  }
+  },
+  "vars": {
+    // Public identifiers, not secrets - safe to commit. PLAID_CLIENT_ID,
+    // PLAID_SECRET, and PLAID_ENV are set with `wrangler secret put` instead.
+    "FIREBASE_PROJECT_ID": "amex-benefit-tracker",
+    "ALLOWED_ORIGINS": "http://localhost:5173,null"
+  },
+  "kv_namespaces": [
+    // Create with: npx wrangler kv namespace create PLAID_KV
+    // (and PLAID_KV_preview for `wrangler dev`), then fill in the ids below.
+    { "binding": "PLAID_KV", "id": "REPLACE_WITH_KV_NAMESPACE_ID", "preview_id": "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID" }
+  ]
 }

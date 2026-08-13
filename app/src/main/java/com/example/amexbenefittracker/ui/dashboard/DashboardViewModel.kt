@@ -10,6 +10,7 @@ import com.example.amexbenefittracker.data.remote.PlaidManager
 import com.example.amexbenefittracker.data.remote.PlaidAccount
 import com.example.amexbenefittracker.data.repository.BenefitRepository
 import com.example.amexbenefittracker.domain.model.CardSummary
+import com.example.amexbenefittracker.util.toSlug
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -28,6 +29,13 @@ class DashboardViewModel(
 
     private val _plaidAccounts = MutableStateFlow<List<PlaidAccount>>(emptyList())
     val plaidAccounts = _plaidAccounts.asStateFlow()
+
+    private val _plaidConnected = MutableStateFlow(false)
+    val plaidConnected = _plaidConnected.asStateFlow()
+
+    // slug (e.g. "the_platinum_card") -> Plaid account id, as held by the worker.
+    private val _cardMappings = MutableStateFlow<Map<String, String>>(emptyMap())
+    val cardMappings = _cardMappings.asStateFlow()
 
     private val _plaidError = MutableStateFlow<String?>(null)
     val plaidError = _plaidError.asStateFlow()
@@ -78,7 +86,7 @@ class DashboardViewModel(
 
     init {
         viewModelScope.launch {
-            repository.reprocessExistingTransactions()
+            repository.reprocessExistingTransactions(plaidManager)
             cards.collect { list ->
                 if (_selectedCardId.value == null && list.isNotEmpty()) {
                     _selectedCardId.value = list.find { it.isDefault }?.id ?: list.first().id
@@ -116,9 +124,58 @@ class DashboardViewModel(
     fun refreshData() {
         viewModelScope.launch {
             _isRefreshing.value = true
+            // One-time, idempotent: migrates a locally-held legacy Plaid
+            // token (from before the worker became the sole token holder)
+            // into the worker's KV store. Runs on every refresh so it also
+            // retries after a network failure, but it's a no-op once the
+            // local legacy prefs have been cleared.
+            migrateLegacyPlaidDataIfNeeded()
             repository.refreshData()
-            syncPlaidTransactions()
+            refreshPlaidStatusInternal()
+            syncPlaidTransactionsInternal(attempt = 0)
             _isRefreshing.value = false
+        }
+    }
+
+    private suspend fun migrateLegacyPlaidDataIfNeeded() {
+        val legacyToken = plaidManager.getLegacyAccessToken() ?: return
+        try {
+            // Read a fresh list directly from the repository rather than the
+            // cached `cards` StateFlow, which can still be at its empty
+            // initial value this early (e.g. on a cold start, before
+            // anything has collected it yet) - that would silently migrate
+            // the access token but drop every legacy card mapping.
+            val legacyMappings = repository.getAllCards().first()
+                .associate { card -> card.name.toSlug() to (plaidManager.getLegacyCardMapping(card.id) ?: "") }
+                .filterValues { it.isNotBlank() }
+            plaidManager.migrate(legacyToken, legacyMappings)
+            // Whether migrated=true (imported) or false (already connected
+            // elsewhere), the worker is now authoritative either way, so the
+            // local copy is no longer needed.
+            plaidManager.clearLegacyPlaidPrefs()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Leave the legacy prefs in place so this retries on the next
+            // refresh instead of losing the only copy of the access token.
+        }
+    }
+
+    private suspend fun refreshPlaidStatusInternal() {
+        try {
+            val status = plaidManager.fetchStatus()
+            _plaidConnected.value = status.connected
+            _plaidAccounts.value = status.accounts ?: emptyList()
+            _cardMappings.value = status.cardMappings ?: emptyMap()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            _plaidError.value = "Failed to fetch Plaid status: ${e.localizedMessage}"
+        }
+    }
+
+    /** Public entry point for UI-triggered refreshes (e.g. opening the Plaid settings dialog). */
+    fun refreshPlaidStatus() {
+        viewModelScope.launch {
+            refreshPlaidStatusInternal()
         }
     }
 
@@ -154,8 +211,9 @@ class DashboardViewModel(
         viewModelScope.launch {
             _plaidError.value = null
             try {
-                val clientUserId = UUID.randomUUID().toString()
-                val token = plaidManager.createLinkToken(clientUserId)
+                // No client_user_id to generate anymore - the worker derives
+                // it from the caller's verified Firebase uid.
+                val token = plaidManager.createLinkToken()
                 onSuccess(token)
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -168,8 +226,10 @@ class DashboardViewModel(
         viewModelScope.launch {
             _plaidError.value = null
             try {
-                val accessToken = plaidManager.exchangePublicToken(publicToken)
-                fetchPlaidAccounts(accessToken)
+                // The worker no longer hands back an access_token (it never
+                // leaves KV) - refresh status to pick up connected/accounts.
+                plaidManager.exchangePublicToken(publicToken)
+                refreshPlaidStatusInternal()
             } catch (e: Exception) {
                 e.printStackTrace()
                 _plaidError.value = "Token exchange failed: ${e.localizedMessage}"
@@ -177,42 +237,75 @@ class DashboardViewModel(
         }
     }
 
-    fun fetchPlaidAccounts(accessToken: String) {
-        viewModelScope.launch {
-            try {
-                val accounts = plaidManager.getAccounts(accessToken)
-                _plaidAccounts.value = accounts
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _plaidError.value = "Failed to fetch accounts: ${e.localizedMessage}"
-            }
-        }
-    }
-
     fun mapCardToPlaidAccount(cardId: Long, plaidAccountId: String) {
-        plaidManager.saveCardMapping(cardId, plaidAccountId)
-        // Clear mapping from other cards if they had it
-        cards.value.forEach { card ->
-            if (card.id != cardId && plaidManager.getCardMapping(card.id) == plaidAccountId) {
-                plaidManager.saveCardMapping(card.id, "")
-            }
-        }
-        // Force refresh accounts list
-        _plaidAccounts.value = _plaidAccounts.value
-    }
-
-    fun syncPlaidTransactions() {
-        val token = plaidManager.getAccessToken() ?: return
+        val card = cards.value.find { it.id == cardId } ?: return
         viewModelScope.launch {
             try {
                 _plaidError.value = null
-                val newTx = plaidManager.syncTransactions(token)
-                repository.processSyncedTransactions(newTx, plaidManager)
-                repository.reprocessExistingTransactions()
+                val slug = card.name.toSlug()
+                val updates = mutableMapOf(slug to plaidAccountId)
+                // Clear the mapping from any other card that previously
+                // pointed at this same Plaid account, mirroring the old
+                // one-account-per-card behavior.
+                if (plaidAccountId.isNotBlank()) {
+                    _cardMappings.value.forEach { (otherSlug, mappedAccountId) ->
+                        if (otherSlug != slug && mappedAccountId == plaidAccountId) {
+                            updates[otherSlug] = ""
+                        }
+                    }
+                }
+                _cardMappings.value = plaidManager.saveCardMappings(updates)
+                repository.reprocessExistingTransactions(plaidManager)
             } catch (e: Exception) {
                 e.printStackTrace()
-                _plaidError.value = "Sync failed: ${e.localizedMessage}"
+                _plaidError.value = "Failed to update account mapping: ${e.localizedMessage}"
             }
+        }
+    }
+
+    fun disconnectPlaid() {
+        viewModelScope.launch {
+            try {
+                _plaidError.value = null
+                plaidManager.disconnect()
+                _plaidConnected.value = false
+                _plaidAccounts.value = emptyList()
+                _cardMappings.value = emptyMap()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _plaidError.value = "Failed to disconnect: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun syncPlaidTransactions() {
+        viewModelScope.launch {
+            syncPlaidTransactionsInternal(attempt = 0)
+        }
+    }
+
+    // The worker's sync cursor is destructive-on-advance, so it's committed
+    // explicitly only after this device has durably persisted the synced
+    // transactions - and via compare-and-swap against from_cursor, so a
+    // cursor advanced by another device in the meantime is detected (409)
+    // rather than silently skipping transactions. A capped retry re-syncs
+    // against the newer cursor in that case instead of looping forever.
+    private suspend fun syncPlaidTransactionsInternal(attempt: Int) {
+        if (!_plaidConnected.value || attempt >= 3) return
+        try {
+            _plaidError.value = null
+            val result = plaidManager.syncTransactions()
+            if (result.added.isNotEmpty()) {
+                repository.processSyncedTransactions(result.added, plaidManager)
+            }
+            repository.reprocessExistingTransactions(plaidManager)
+            val committed = plaidManager.commitCursor(result.nextCursor, result.fromCursor)
+            if (!committed) {
+                syncPlaidTransactionsInternal(attempt + 1)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            _plaidError.value = "Sync failed: ${e.localizedMessage}"
         }
     }
 

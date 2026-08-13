@@ -28,7 +28,10 @@ class MainActivity : ComponentActivity() {
 
 
     private val authViewModel: AuthViewModel by viewModels {
-        AuthViewModel.Factory((application as AmexApplication).authRepository)
+        AuthViewModel.Factory(
+            (application as AmexApplication).authRepository,
+            (application as AmexApplication).plaidManager
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
