@@ -1,0 +1,35 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Plaid credentials belong exclusively to the Cloudflare Worker's KV
+    // store now (see cloudflare-worker/ on android_main), never to a
+    // client-writable document - this makes that invariant enforceable
+    // instead of merely conventional. A legacy plaid_tokens field written
+    // before that change may still exist on some documents until the
+    // one-time migration in App.jsx clears it, so this only blocks a
+    // write from introducing or changing a non-null value; leaving an
+    // existing (unrelated-write) or clearing one (the migration's own
+    // deleteField() call) is still allowed.
+    function plaidTokensUnchangedOrCleared() {
+      let oldVal = resource.data.get('plaid_tokens', null);
+      let newVal = request.resource.data.get('plaid_tokens', null);
+      return newVal == oldVal || newVal == null;
+    }
+
+    match /users/{userId} {
+      allow read, delete: if isOwner(userId);
+      allow create: if isOwner(userId) && !request.resource.data.keys().hasAny(['plaid_tokens']);
+      allow update: if isOwner(userId) && plaidTokensUnchangedOrCleared();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

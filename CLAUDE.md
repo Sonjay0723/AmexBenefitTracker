@@ -43,6 +43,8 @@ tracking_year, corp_credits, recent_credits
 
 `plaid_tokens` used to live here too but no longer should — see the Plaid section below. New code should never write to it.
 
+`firestore.rules` (deploy with `npx firebase deploy --only firestore:rules`, using the project alias in `.firebaserc`) is the only thing that makes that a hard rule rather than a convention: it scopes `users/{userId}` to `request.auth.uid == userId` and rejects any write that introduces or changes a `plaid_tokens` value, while still allowing the one-time migration to clear a legacy one.
+
 `serializeClaims` writes **canonical** period keys (`"01".."12"`, `"Annual"`, `"Q1".."Q4"`, `"H1"/"H2"`), while `deserializeClaims` reads **leniently** via `getPossibleFirestorePeriodKeys`, which also accepts unpadded months and `JAN`-style abbreviations written by older clients and the Android app. Preserve that write-strict/read-tolerant asymmetry when touching key formats — dropping a legacy key silently loses users' historical claims.
 
 `year` is a **string** (e.g. `"2026"`) because it is a Firestore map key. It is derived from the current `America/New_York` date on load, then overridden by `tracking_year` from the document.
